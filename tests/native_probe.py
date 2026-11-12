@@ -137,8 +137,6 @@ async def probe(root):
     assert clock.job_id != old_id and len(await manager.list_jobs()) == 1
     await clock.stop()
     assert not await manager.list_jobs()
-    manager.scheduler.shutdown(wait=False)
-    await asyncio.sleep(0.02)
 
     class FakeClient:
         mode = 'ok'
@@ -170,12 +168,57 @@ async def probe(root):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     registrations = []
-    plugin = module.DailyDigest(SimpleNamespace(register_web_api=lambda *args: registrations.append(args)))
+    response = [json.dumps({'summary':'合成通知','candidates':[{'title':'合成课程',
+        'event_at':(utcnow()+timedelta(hours=3)).isoformat(),'sources':[messages[0]['id']],'place':'fixture'}]})]
+    class FlowManager:
+        async def get_provider_by_id(self, name):
+            return Fake(name,RuntimeError('simulated')) if name=='primary' else Fake(name,response[0])
+    plugin_context = SimpleNamespace(register_web_api=lambda *args: registrations.append(args),cron_manager=manager,
+        provider_manager=FlowManager(),get_config=context.get_config,message_history_manager=history)
+    plugin = module.DailyDigest(plugin_context)
     await plugin.initialize()
     assert plugin.initialized and registrations[0][0].endswith('/rpc')
     assert await plugin.store.list_tasks() == []
+    from digest.adapters import SendResult
+    from digest.workflow_store import entities
+    from astrbot.api.message_components import Reply
+    receipts=[]
+    class FlowSender:
+        async def send_text(self,recipient,text):
+            assert recipient=='probe:FriendMessage:42'
+            receipts.append(text)
+            return SendResult('acknowledged',str(len(receipts)))
+    plugin.runtime.sender=FlowSender()
+    saved=await plugin.service.save(TaskConfig(name='probe',groups=['probe:GroupMessage:1'],
+        provider_id='primary',recipient='probe:FriendMessage:42'))
+    saved=await plugin.service.enable(saved['id'],saved['version'],True)
+    planned=utcnow()
+    await plugin.store.call(lambda db:db.execute('UPDATE tasks SET next_at=? WHERE id=?',(planned.isoformat(),saved['id'])))
+    await plugin.runtime.tick(now=planned)
+    async with asyncio.timeout(12):
+        while True:
+            lists=await plugin.store.call(lambda db:entities(db,'list'))
+            if lists and lists[0]['state']=='active': break
+            await asyncio.sleep(.02)
+    assert len(receipts)==2,receipts
+    response[0]=json.dumps({'action':'select','list_id':lists[0]['id'],'indices':[1],'evidence':'加入第1项'})
+    stopped=[]
+    event=SimpleNamespace(get_platform_name=lambda:'aiocqhttp',
+        get_messages=lambda:[Reply(id=2)],unified_msg_origin='probe:FriendMessage:42',
+        message_obj=SimpleNamespace(message_id='user-1'),message_str='加入第1项',stop_event=lambda:stopped.append(True))
+    await plugin.on_private(event)
+    await plugin.on_private(event)
+    reminders=await plugin.store.call(lambda db:entities(db,'reminder'))
+    assert len(reminders)==1 and len(stopped)==2
+    response[0]=json.dumps({'action':'ignore'})
+    event.message_obj.message_id='user-2';event.message_str='今天天气怎样'
+    await plugin.on_private(event)
+    assert len(stopped)==2,'unrelated chat should not be stopped'
     await plugin.terminate()
     assert not plugin.initialized
+    assert not await manager.list_jobs()
+    manager.scheduler.shutdown(wait=False)
+    await asyncio.sleep(0.02)
     await db.engine.dispose()
     # The framework's import-time helper also points exclusively into root.
     from astrbot.core import db_helper
@@ -186,6 +229,7 @@ async def probe(root):
             'plugin_model_adapter': 'pass', 'plugin_history_snapshot': 'pass',
             'plugin_cron_rebuild': 'pass', 'plugin_send_receipt_classification': 'pass',
             'plugin_entry_lifecycle': 'pass',
+            'plugin_scheduled_pipeline': 'pass', 'plugin_private_reply_pipeline': 'pass',
             'live_model_calls': 0, 'qq_messages': 0}
 
 

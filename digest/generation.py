@@ -26,7 +26,7 @@ class Generator:
         messages, coverage = await self.history.read(task.groups, start, end)
         result = {'window_start': start.isoformat(), 'window_end': end.isoformat(),
                   'coverage': coverage, 'summary': '', 'candidates': [], 'models': [],
-                  'logical_calls': 0, 'warnings': []}
+                  'logical_calls': 0, 'warnings': [], 'changes': []}
         if not messages:
             return result
         prepared = await self.models.prepare(task)
@@ -46,7 +46,10 @@ class Generator:
                 raise RuntimeError('达到单次生成逻辑调用预算，未发送半成品')
             spec = ('输出 {"summary":"简报正文，无重要内容时为空", "candidates":'
                     '[{"title":"事项", "event_at":"带时区ISO时间，无法确定则null",'
-                    '"sources":["来源id"], "place":"地点或空字符串"}]}。候选事项必须出现在正文中。'
+                    '"sources":["来源id"], "place":"地点或空字符串"}], "changes":'
+                    '[{"title":"原事项名称","old_event_at":"原带时区ISO时间",'
+                    '"event_at":"改期后带时区ISO时间或null","cancelled":false,"sources":["来源id"]}]}。'
+                    '候选事项必须出现在正文中。仅在资料明确给出原事项时间及改期或取消时填写 changes；不猜测原时间。'
                     if final else '提取并合并重要事实，保留原始来源id、日期、变更与取消信息；输出 {"facts":[...]}。')
             prompt = spec + '\n资料：\n' + payload
             if len(prompt.encode('utf-8')) > budget + 900:
@@ -102,6 +105,19 @@ class Generator:
             raise ValueError('模型最终结果格式不正确')
         result['summary'] = final['summary'].strip()
         known = {m['id'] for m in messages}
+        changes = final.get('changes', [])
+        if not isinstance(changes, list):
+            raise ValueError('变更列表格式不正确')
+        for item in changes:
+            if not isinstance(item, dict) or not isinstance(item.get('title'), str) or type(item.get('cancelled')) is not bool:
+                raise ValueError('变更事项格式不正确')
+            sources = item.get('sources')
+            if not isinstance(sources,list) or not sources or any(not isinstance(s,str) or s not in known for s in sources):
+                raise ValueError('变更事项缺少有效来源')
+            old = parse_time(item['old_event_at']).isoformat()
+            new = None if item['cancelled'] else parse_time(item['event_at']).isoformat()
+            result['changes'].append({'title':item['title'],'old_event_at':old,'event_at':new,
+                                      'cancelled':item['cancelled'],'sources':sources})
         today = utcnow().astimezone(ZoneInfo(task.timezone)).date()
         for item in final['candidates']:
             if not isinstance(item, dict) or not isinstance(item.get('title'), str):

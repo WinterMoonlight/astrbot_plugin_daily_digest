@@ -9,20 +9,25 @@
 </head>
 <body>
   <header><div><p class="eyebrow">ASTRBOT · DAILY DIGEST</p><h1>多群每日简报</h1></div><button id="refresh">刷新</button></header>
-  <p class="notice">开发预览版 · 可配置任务并生成预览。定时投递、补发和提醒尚未开放，不会向 QQ 发送消息。</p>
+  <p class="notice">任务保存后默认停用。启用后从下一计划时点生成并私聊投递；预览只展示结果，提醒由收件人选择后创建。</p>
   <div id="message" role="status" aria-live="polite"></div>
   <div class="layout">
     <aside>
       <div class="section-title"><h2>任务</h2><button id="new">＋ 新建</button></div>
       <div id="tasks"></div>
+      <label class="inline"><input type="checkbox" id="show-archived">显示归档任务（仍可管理已有提醒）</label>
       <details><summary>全局设置</summary>
         <label>同时生成上限<input id="concurrency" type="number" min="1" value="1"></label>
         <label>执行详情保留天数<input id="retention" type="number" min="1" value="30"></label>
+        <label>单条文字长度<input id="text-limit" type="number" min="32" value="1500"></label>
+        <label>分条间隔（秒）<input id="send-interval" type="number" min="1" value="1"></label>
+        <label>生成超时（秒）<input id="generation-timeout" type="number" min="1" value="1200"></label>
+        <label>生成调用预算<input id="call-budget" type="number" min="1" value="64"></label>
         <button id="settings-save">保存全局设置</button>
       </details>
     </aside>
     <main>
-      <div class="section-title"><h2 id="task-title">新建任务</h2><span class="badge">默认停用</span></div>
+      <div class="section-title"><h2 id="task-title">新建任务</h2><span class="badge" id="task-status">默认停用</span></div>
       <nav aria-label="任务详情"><button data-tab="config" aria-current="page">配置</button><button data-tab="preview">预览</button><button data-tab="records">执行记录</button><button data-tab="reminders">关联提醒</button></nav>
       <section id="config" class="tab">
         <form id="form">
@@ -36,7 +41,7 @@
           <div class="grid"><label>时区<input name="timezone" value="Asia/Shanghai"></label><label>回看时长（小时）<input name="lookback_hours" type="number" min="1" value="24"></label></div>
           <label>总结提示词<textarea name="prompt" rows="6"></textarea></label>
           <div class="grid triple"><label>默认提前（分钟）<input name="lead_minutes" type="number" min="0" value="30"></label><label>候选日期天数<input name="candidate_days" type="number" min="1" value="7"></label><label>清单有效（小时）<input name="selection_hours" type="number" min="1" value="24"></label></div>
-          <div class="actions"><button type="submit" class="primary">保存配置</button><button type="button" id="archive">归档任务</button></div>
+          <div class="actions"><button type="submit" class="primary" id="save">保存配置</button><button type="button" id="toggle">启用任务</button><button type="button" id="archive">归档任务</button></div>
         </form>
       </section>
       <section id="preview" class="tab" hidden>
@@ -44,9 +49,14 @@
         <button id="generate" class="primary">保存并生成预览</button>
         <p id="preview-state"></p><pre id="preview-text" class="result">尚无预览。</pre>
         <details><summary>消息覆盖与生成信息</summary><pre id="preview-meta"></pre></details>
+        <section id="delivery-panel" hidden><h3>本次计划的投递与补发</h3>
+          <p class="muted">先查看正文和分条状态，再提交补发。成功分条不会重发；未知结果需先到 QQ 核对后标记。正文已清理或未生成时，将按原计划窗口读取现存历史重新生成。</p>
+          <div class="actions"><button id="catchup-preview">准备补发预览</button><button id="resend-digest">确认补发未成功的简报</button><button id="resend-inquiry">单独补发日程询问</button><button id="delivery-refresh">刷新状态</button></div>
+          <div id="delivery-parts"></div>
+        </section>
       </section>
       <section id="records" class="tab" hidden><div id="run-list">选择任务后查看记录。</div><button id="more">下一页</button></section>
-      <section id="reminders" class="tab" hidden><p class="muted">提醒功能尚未开放。后续会在这里展示候选清单、已创建提醒与待确认变更。</p></section>
+      <section id="reminders" class="tab" hidden><p class="muted">提醒独立于简报任务；停用或归档任务不会取消已创建的提醒。时间显示带时区，修改时间请填写带时区的 ISO 时间，例如 2026-12-01T14:30:00+08:00。</p><button id="related-refresh">刷新关联提醒</button><div id="related-list"></div></section>
     </main>
   </div>
   <script type="module" src="./app.js"></script>

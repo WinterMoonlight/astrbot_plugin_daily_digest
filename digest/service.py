@@ -14,6 +14,7 @@ class Service:
         self.wake = asyncio.Event()
         self.stopping = False
         self.pump_task = None
+        self.on_ready = None
 
     async def start(self):
         await self.store.initialize()
@@ -48,9 +49,31 @@ class Service:
             await asyncio.gather(active, return_exceptions=True)
         return result
 
+    async def enable(self, task_id, version, enabled):
+        if type(enabled) is not bool:
+            raise ValueError('启用状态必须为布尔值')
+        if enabled:
+            task = await self.store.get_task(task_id)
+            await self.generator.models.prepare(TaskConfig.from_dict(task['config']))
+        result = await self.store.set_enabled(task_id, version, enabled)
+        active = self.active.get(task_id)
+        if not enabled and active:
+            active.cancel()
+            await asyncio.gather(active, return_exceptions=True)
+        self.wake.set()
+        return result
+
+    async def save(self, config, task_id=None, version=None):
+        if task_id and (await self.store.get_task(task_id))['enabled']:
+            await self.generator.models.prepare(config)
+        return await self.store.save_task(config,task_id,version)
+
     async def execute(self, run, settings):
         try:
-            if (await self.store.get_task(run['task_id']))['archived']:
+            current = await self.store.get_task(run['task_id'])
+            manual = await self.store.call(lambda db: db.execute(
+                'SELECT manual FROM delivery WHERE run_id=?', (run['id'],)).fetchone())
+            if current['archived'] or (run['kind']=='scheduled' and not current['enabled'] and not (manual and manual[0])):
                 await self.store.finish(run['id'], 'cancelled')
                 return
             task = TaskConfig.from_dict(run['snapshot']['config'])
@@ -62,6 +85,8 @@ class Service:
                 await self.store.finish(run['id'], 'cancelled')
             else:
                 await self.store.finish(run['id'], 'ready' if result['summary'] else 'empty', result)
+                if self.on_ready and run['kind']=='scheduled' and result['summary']:
+                    await self.on_ready(run['id'])
         except asyncio.CancelledError:
             # Leave generating in durable state; startup recovers it as queued.
             if not self.stopping:

@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .domain import TaskConfig, parse_time, utcnow
+from .workflow_store import WorkflowStore
 
 
 class Conflict(ValueError):
@@ -19,7 +20,7 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
-class Store:
+class Store(WorkflowStore):
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +43,10 @@ class Store:
 
     async def initialize(self):
         def setup(db):
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone():
+                version=db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
+                if version not in (1,2):
+                    raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
                 INSERT OR IGNORE INTO schema_version VALUES (1);
@@ -62,7 +67,7 @@ class Store:
                 CREATE INDEX IF NOT EXISTS run_status ON runs(status,created_at);
             ''')
             version = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-            if version != 1:
+            if version not in (1, 2):
                 raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (encode({
                 'concurrency': 1, 'retention_days': 30, 'text_limit': 1500,
@@ -71,6 +76,7 @@ class Store:
             db.execute("UPDATE runs SET status='queued' WHERE status='generating'")
             db.execute("UPDATE parts SET state='unknown' WHERE state='sending'")
         await self.call(setup)
+        await self.migrate_workflow()
 
     @staticmethod
     def task(row):
@@ -82,9 +88,9 @@ class Store:
         result['archived'] = bool(result['archived'])
         return result
 
-    async def list_tasks(self):
+    async def list_tasks(self, include_archived=False):
         return await self.call(lambda db: [self.task(r) for r in db.execute(
-            'SELECT * FROM tasks WHERE archived=0 ORDER BY updated_at DESC')])
+            'SELECT * FROM tasks '+('' if include_archived else 'WHERE archived=0 ')+'ORDER BY updated_at DESC')])
 
     async def get_task(self, task_id):
         return await self.call(lambda db: self.task(db.execute(
@@ -124,6 +130,9 @@ class Store:
                        (int(enabled), int(archive), next_at, utcnow().isoformat(), task_id))
             if not enabled:
                 db.execute("UPDATE runs SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
+                db.execute("INSERT OR IGNORE INTO delivery(run_id,authorized) SELECT id,0 FROM runs WHERE task_id=? AND kind='scheduled'",(task_id,))
+                db.execute('UPDATE delivery SET authorized=0 WHERE run_id IN (SELECT id FROM runs WHERE task_id=?)',(task_id,))
+                db.execute("UPDATE outbox SET state='held' WHERE task_id=? AND state='pending'",(task_id,))
             return self.task(db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
         return await self.call(change)
 
@@ -203,3 +212,4 @@ class Store:
         await self.call(lambda db: db.execute('''UPDATE runs SET result=NULL,error=NULL
             WHERE updated_at<? AND status IN ('empty','failed','cancelled','ready')
             AND kind='preview' AND NOT EXISTS (SELECT 1 FROM parts WHERE parts.run_id=runs.id)''', (cutoff,)))
+        await self.cleanup_workflow(days)
