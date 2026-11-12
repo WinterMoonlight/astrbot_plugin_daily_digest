@@ -65,6 +65,7 @@ class Interactions:
     async def context(self,recipient,quote=None):
         def read(db):
             result={k:entities(db,k,recipient) for k in ('list','reminder','change')}
+            result['deleted']=entities(db,'deleted_list',recipient)+entities(db,'deleted_reminder',recipient)
             result['quoted']=[]
             if quote:
                 result['quoted']=[dict(r) for r in db.execute(
@@ -101,6 +102,20 @@ class Interactions:
             if self.native:
                 await self.native.sync(locked=True)
             context=await self.context(recipient,quote)
+            previous=await self.store.call(lambda db:db.execute(
+                'SELECT state,result FROM interactions WHERE recipient=? AND message_id=?',(recipient,str(message_id))).fetchone())
+            if previous:
+                return previous['state']!='ignored'
+            quoted={x['owner'] for x in context['quoted']}
+            if any(x['id'][:8] in text or x['id'] in quoted or
+                   any(owner.startswith(x['id']+':') for owner in quoted) for x in context['deleted']):
+                def reject_deleted(db):
+                    db.execute('INSERT INTO interactions(recipient,message_id,state,created_at) VALUES (?,?,?,?)',
+                               (recipient,str(message_id),'processing',utcnow().isoformat()))
+                    self.reply(db,recipient,str(message_id),'该清单或提醒所属记录已删除，不会按其他清单重新执行。')
+                await self.store.call(reject_deleted)
+                self.runtime.wake.set()
+                return True
             if not any(context[k] for k in ('list','reminder','change')):
                 return False
             scoped=self.scope(context,text)
@@ -109,16 +124,13 @@ class Interactions:
                 return False
             # Select a model from this recipient's known task, never another user's task.
             first=candidates[0]
-            config=first.get('config')
+            config=first.get('config') or first.get('interaction_config')
             if not config:
                 config=(await self.store.get_task(first['task_id']))['config']
                 config={**config,'recipient':recipient}
-            previous=await self.store.call(lambda db:db.execute(
-                'SELECT state,result FROM interactions WHERE recipient=? AND message_id=?',(recipient,str(message_id))).fetchone())
-            if previous:
-                return previous['state']!='ignored'
             await self.store.call(lambda db:db.execute('INSERT INTO interactions(recipient,message_id,state,created_at) VALUES (?,?,?,?)',
                 (recipient,str(message_id),'processing',utcnow().isoformat())))
+            await self.store.call(lambda db:self.remember(db,recipient,str(message_id),scoped))
             try:
                 intent=await self.interpreter.parse(config,text,scoped)
                 if intent.get('immediate') and not any(word in text.lower() for word in ('现在','立即','马上','此刻','这会儿','now')):
@@ -132,7 +144,11 @@ class Interactions:
                     raise ValueError('有多项待确认操作，请写出提醒确认编号')
                 if intent.get('action') in ('modify','cancel') and len(scoped['reminder'])!=1:
                     raise ValueError('有多个提醒，请写出完整事项名称或提醒编号')
-                answer=await self.store.call(lambda db:self.apply(db,recipient,intent,scoped))
+                def apply(db):
+                    answer=self.apply(db,recipient,intent,scoped)
+                    self.remember(db,recipient,str(message_id),scoped,intent)
+                    return answer
+                answer=await self.store.call(apply)
                 if self.native:
                     answer=await self.native.feedback(answer,recipient,locked=True)
                 await self.store.call(lambda db:self.reply(db,recipient,str(message_id),answer))
@@ -146,6 +162,23 @@ class Interactions:
             return True
 
     @staticmethod
+    def remember(db,recipient,message_id,scope,intent=None):
+        records=[]
+        for kind in ('list','reminder','change'):
+            values=scope[kind]
+            if intent:
+                values=[x for x in values if x['id']==intent.get(kind+'_id')]
+            records.extend(values)
+        task_ids=set()
+        for record in records:
+            task_ids.update(record.get('task_ids',[]))
+            if record.get('task_id'):
+                task_ids.add(record['task_id'])
+        put(db,'interaction_refs',{'id':recipient+'/'+message_id,'recipient':recipient,
+            'task_ids':sorted(task_ids),'list_ids':[x['id'] for x in scope['list'] if x in records],
+            'reminder_ids':[x['id'] for x in scope['reminder'] if x in records]})
+
+    @staticmethod
     def reply(db,recipient,message_id,answer):
         settings=json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
         outgoing(db,recipient+'/'+message_id,'reply',recipient,answer,settings['text_limit'])
@@ -156,6 +189,9 @@ class Interactions:
         if ident not in {x['id'] for x in scope[kind]}:
             raise ValueError('回复没有明确关联到可操作的事项，请引用对应消息')
         value=entity(db,kind,ident)
+        if value.get('delete_pending_task') or (kind in ('list','change') and any(
+                x['id']==value.get('task_id') for x in entities(db,'task_deletion'))):
+            raise ValueError('该任务正在彻底删除，请先在管理页完成删除')
         if value['recipient']!=recipient:
             raise ValueError('不能操作其他收件人的提醒')
         return value
@@ -214,6 +250,8 @@ class Interactions:
             same=(old['title']==candidate['title'] and old['event_at']==candidate['event_at'] and
                   (old.get('place','')==candidate.get('place','') or bool(set(old['sources']) & set(candidate['sources']))))
             if same and old['state'] not in ('cancelled','missed'):
+                if old.get('delete_pending_task'):
+                    raise ValueError('同一提醒正在随旧任务删除，请先完成删除再选择')
                 old['task_ids']=list(dict.fromkeys(old['task_ids']+[record['task_id']]))
                 old['list_ids']=list(dict.fromkeys(old['list_ids']+[record['id']]))
                 put(db,'reminder',old)
@@ -248,6 +286,8 @@ class Interactions:
         return f"{title}：提醒时间已过，尚未执行。请回复“确认 {change['id'][:8]}，现在提醒”或指定新的提醒时间。"
 
     def modify(self,db,reminder,intent,now,settings,confirmed=False):
+        if reminder.get('delete_pending_task'):
+            raise ValueError('该提醒正在随任务删除，请先在管理页完成删除')
         if reminder.get('native_owned'):
             if reminder['state']=='native_absent':
                 raise ValueError('原生任务已结束或已删除，请在未来任务核查；不会自动重新创建')

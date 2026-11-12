@@ -14,6 +14,7 @@ from .digest.storage import Conflict, Store
 from .digest.runtime import Runtime
 from .digest.interactions import Interactions, Interpreter
 from .digest.native_reminders import NativeReminders
+from .digest.deletion import TaskDeletion
 
 PLUGIN_NAME = 'astrbot_plugin_daily_digest'
 
@@ -31,6 +32,7 @@ class DailyDigest(Star):
         self.runtime = Runtime(self.store, self.service, self.onebot, self.native_reminders)
         self.service.on_ready = self.runtime.freeze
         self.interactions = Interactions(self.store, Interpreter(self.models), self.runtime)
+        self.deletion = TaskDeletion(self.store, self.service, self.native_reminders)
         self.clock = NativeClock(context.cron_manager)
         self.initialized = False
         context.register_web_api(f'/{PLUGIN_NAME}/rpc', self.rpc, ['POST'], '每日简报管理')
@@ -133,6 +135,11 @@ class DailyDigest(Star):
             elif action == 'related':
                 await self.native_reminders.sync()
                 data = await self.store.related(payload['id'])
+            elif action == 'delete_preview':
+                data = await self.deletion.preview(payload['id'])
+            elif action == 'delete':
+                data = await self.deletion.delete(payload['id'], payload['version'], payload['token'],
+                                                  payload['cancel_unique'], payload['confirmation'])
             elif action == 'reminder':
                 data = {'message':await self.interactions.manage(payload['id'],payload['operation'],
                                                                payload['version'],payload.get('values'))}

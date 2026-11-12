@@ -46,7 +46,10 @@ class Runtime:
 
     async def freeze(self, run_id):
         def work(db):
-            run = self.store.run(db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone())
+            row = db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is None:
+                return  # An archived task can be deleted after the worker's ready snapshot.
+            run = self.store.run(row)
             if run['kind'] != 'scheduled' or not run['result'] or not run['result'].get('summary'):
                 return
             settings = json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
@@ -141,7 +144,7 @@ class Runtime:
                     record['state']='expired'
                 put(db,'list',record)
             for reminder in entities(db,'reminder'):
-                if reminder.get('native_owned'):
+                if reminder.get('native_owned') or reminder.get('delete_pending_task'):
                     continue
                 owner=f"{reminder['id']}:{reminder['version']}"
                 rows=db.execute("SELECT * FROM outbox WHERE owner=? AND channel='reminder'",(owner,)).fetchall()
@@ -200,7 +203,7 @@ class Runtime:
                 elif row['channel']=='reminder':
                     ident,version=row['owner'].split(':')
                     reminder=entity(db,'reminder',ident)
-                    if reminder.get('native_owned'):
+                    if reminder.get('native_owned') or reminder.get('delete_pending_task'):
                         continue
                     if reminder['version']!=int(version) or reminder['state'] not in ('scheduled','retry_wait') or parse_time(reminder['event_at'])<=now:
                         continue

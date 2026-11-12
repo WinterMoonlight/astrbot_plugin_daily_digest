@@ -41,7 +41,8 @@
           <div class="grid"><label>时区<input name="timezone" value="Asia/Shanghai"></label><label>回看时长（小时）<input name="lookback_hours" type="number" min="1" value="24"></label></div>
           <label>总结提示词<textarea name="prompt" rows="6"></textarea></label>
           <div class="grid triple"><label>默认提前（分钟）<input name="lead_minutes" type="number" min="0" value="30"></label><label>候选日期天数<input name="candidate_days" type="number" min="1" value="7"></label><label>清单有效（小时）<input name="selection_hours" type="number" min="1" value="24"></label></div>
-          <div class="actions"><button type="submit" class="primary" id="save">保存配置</button><button type="button" id="toggle">启用任务</button><button type="button" id="archive">归档任务</button></div>
+          <div class="actions"><button type="submit" class="primary" id="save">保存配置</button><button type="button" id="toggle">启用任务</button><button type="button" id="archive">归档任务</button><button type="button" class="danger" id="delete-task" disabled>彻底删除任务</button></div>
+          <p class="muted">彻底删除需先归档；删除前可查看范围，并选择是否取消该任务独有的提醒。</p>
         </form>
       </section>
       <section id="preview" class="tab" hidden>
@@ -59,6 +60,19 @@
       <section id="reminders" class="tab" hidden><p class="muted">提醒逐条加入 AstrBot「未来任务」，可在那里修改、停用和删除；到点由原生模型/工具执行，本插件不额外重试。原生一次性任务执行后会移除，消失不代表已送达。提醒独立于简报任务；停用或归档简报不会取消提醒。时间显示带时区，修改时间请填写带时区的 ISO 时间，例如 2026-12-01T14:30:00+08:00。</p><button id="related-refresh">刷新关联提醒</button><div id="related-list"></div></section>
     </main>
   </div>
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <h2 id="delete-title">彻底删除任务</h2>
+    <p id="delete-name"></p>
+    <p id="delete-counts"></p>
+    <p>任务配置、执行记录、简报正文和候选清单将永久删除，无法在页面恢复。仅保留不含正文的最小防重复处理凭据。</p>
+    <p id="delete-legacy" class="muted"></p>
+    <label class="inline"><input type="checkbox" id="delete-reminders">同时取消该任务独有的提醒（默认保留）</label>
+    <p id="delete-shared" class="muted"></p>
+    <p class="muted">保留的提醒仍可在 AstrBot「未来任务」管理。已发送的 QQ 消息、AstrBot 群历史、宿主日志及已有备份不受影响。</p>
+    <label>输入“彻底删除”确认<input id="delete-confirmation" autocomplete="off"></label>
+    <p id="delete-error" role="alert"></p>
+    <div class="actions"><button id="delete-cancel">取消</button><button id="delete-confirm" class="danger" disabled>确认彻底删除</button></div>
+  </dialog>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

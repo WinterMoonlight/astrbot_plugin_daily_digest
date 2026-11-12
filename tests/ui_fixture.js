@@ -16,6 +16,8 @@
       }
       case 'settings':Object.assign(settings,payload.values);data=settings;break;
       case 'archive':data=tasks.find(t=>t.id===payload.id);data.archived=true;data.enabled=false;data.version++;break;
+      case 'delete_preview':{const t=tasks.find(t=>t.id===payload.id);data={id:t.id,name:t.config.name,version:t.version,archived:t.archived,busy:false,token:'fixture-token',runs:Object.keys(runs).length,lists:1,unique_reminders:1,shared_reminders:0,legacy_reply_texts:0,resuming:false,cancel_unique:false};break;}
+      case 'delete':if(payload.confirmation!=='彻底删除'||payload.token!=='fixture-token')throw new Error('删除确认无效');tasks=tasks.filter(t=>t.id!==payload.id);runs={};data={deleted:true};break;
       case 'enable':data=tasks.find(t=>t.id===payload.id);data.enabled=payload.enabled;data.version++;runs.formal1={id:'formal1',task_id:data.id,kind:'scheduled',status:'unknown',snapshot:{planned_at:new Date().toISOString()},created_at:new Date().toISOString(),result:{summary:'第一段已发送\n第二段结果未知',candidates:[]}};break;
       case 'preview':{
         data={id:'preview1'};runs.preview1={id:'preview1',kind:'preview',status:'ready',created_at:new Date().toISOString(),result:{summary:'重要通知\n今天 15:00 课程说明会。\n\n<img src=x onerror=alert(1)>\n\n[覆盖说明] 测试源群：覆盖完整性未知',candidates:[],coverage:[{group:'test:GroupMessage:123',count:80,note:'覆盖未知'}],logical_calls:1}};break;

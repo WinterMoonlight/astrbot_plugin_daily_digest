@@ -53,6 +53,8 @@ class NativeReminders:
                 await self.save(reminder)
 
     async def sync_one(self, r, jobs):
+        if r.get('delete_pending_task'):
+            return  # An explicit task deletion owns cancellation until its durable cleanup finishes.
         native_id = r.get('native_job_id')
         if not r.get('native_owned'):
             if r['state'] != 'scheduled':

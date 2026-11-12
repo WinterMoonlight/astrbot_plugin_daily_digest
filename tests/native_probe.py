@@ -224,6 +224,40 @@ async def probe(root):
     event.message_obj.message_id='user-2';event.message_str='今天天气怎样'
     await plugin.on_private(event)
     assert len(stopped)==2,'unrelated chat should not be stopped'
+    await plugin.service.archive(saved['id'],saved['version'])
+    async with asyncio.timeout(5):
+        while True:
+            deletion_preview=await plugin.deletion.preview(saved['id'])
+            if not deletion_preview['busy']: break
+            await asyncio.sleep(.02)
+    await plugin.deletion.delete(saved['id'],deletion_preview['version'],deletion_preview['token'],False,'彻底删除')
+    assert await plugin.store.list_tasks(True)==[]
+    assert any(j.job_id==native_id for j in await manager.list_jobs())
+    # Preserved reminders must still accept private commands after their parent task is gone.
+    response[0]=json.dumps({'action':'modify','reminder_id':reminders[0]['id'],'lead_minutes':15,'evidence':'提前15分钟'})
+    event.message_obj.message_id='orphan-edit';event.message_str=reminders[0]['id'][:8]+' 提前15分钟'
+    event.get_messages=lambda:[]
+    await plugin.on_private(event)
+    orphan=(await plugin.store.call(lambda db:entities(db,'reminder')))[0]
+    assert orphan['lead_minutes']==15 and orphan['task_ids']==[] and orphan['state']=='native_paused'
+    # A second synthetic task exercises optional native cancellation with the real CronJobManager.
+    other=await plugin.service.save(TaskConfig(name='delete-cancel',groups=['probe:GroupMessage:1'],
+        provider_id='primary',recipient='probe:FriendMessage:42'))
+    from digest.workflow_store import put,uid
+    synthetic={**orphan,'id':uid(),'task_id':other['id'],'task_ids':[other['id']],
+               'list_ids':[],'version':1,'state':'scheduled'}
+    synthetic={k:v for k,v in synthetic.items() if not k.startswith('native_')}
+    synthetic['native_owned']=True
+    await plugin.store.call(lambda db:put(db,'reminder',synthetic))
+    await plugin.native_reminders.sync()
+    await plugin.service.archive(other['id'],other['version'])
+    async with asyncio.timeout(5):
+        while True:
+            deletion_preview=await plugin.deletion.preview(other['id'])
+            if not deletion_preview['busy']: break
+            await asyncio.sleep(.02)
+    await plugin.deletion.delete(other['id'],deletion_preview['version'],deletion_preview['token'],True,'彻底删除')
+    assert len(await plugin.store.call(lambda db:entities(db,'reminder')))==1
     await plugin.terminate()
     assert not plugin.initialized
     assert len(await manager.list_jobs())==1, 'native reminder must survive plugin unload'
@@ -245,6 +279,7 @@ async def probe(root):
             'plugin_entry_lifecycle': 'pass',
             'plugin_scheduled_pipeline': 'pass', 'plugin_private_reply_pipeline': 'pass',
             'native_reminder_create_edit_pause_delete_persist': 'pass',
+            'native_task_deletion_keep_and_cancel': 'pass', 'orphan_reminder_private_command': 'pass',
             'live_model_calls': 0, 'qq_messages': 0}
 
 

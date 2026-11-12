@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const form = $('form');
 const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
 let selected = null, selectedRun = null, tasks = [], metadata = {models:[],personas:[],groups:[]}, page = 1, pollToken = 0;
-let bridge, initialized = false;
+let bridge, initialized = false, deletionPreview = null, deleting = false;
 const stateNames={native_paused:'原生任务已停用',native_absent:'原生任务已结束或删除（送达未确认）',pending:'待处理',scheduled:'等待提醒',retry_wait:'等待重试',sending:'发送中',acknowledged:'已确认发送',failed:'失败',unknown:'结果未知',held:'已停止',active:'可选择',awaiting_delivery:'等待询问成功',awaiting_choice:'等待指定时间',expired:'已过期',superseded:'已被新清单替换',cancelled:'已取消',missed:'已错过',confirmed:'已确认',rejected:'已拒绝'};
 const stateName=state=>stateNames[state]||state;
 function message(text, error=false){$('message').textContent=text;$('message').className=error?'error':'';}
@@ -13,7 +13,7 @@ async function api(action, values={}){
 async function guard(fn, button){
   if(button) button.disabled=true;
   try{await fn();}catch(e){message(e.message || String(e),true);}
-  finally{if(button){button.disabled=false;if(['archive','toggle'].includes(button.id))button.disabled=!selected||!!selected.archived;if(['save','generate'].includes(button.id))button.disabled=!!selected?.archived;}}
+  finally{if(button){button.disabled=false;if(['archive','toggle'].includes(button.id))button.disabled=!selected||!!selected.archived;if(['save','generate'].includes(button.id))button.disabled=!!selected?.archived;if(button.id==='delete-task')button.disabled=!selected?.archived;}}
 }
 function option(select,value,label){const node=document.createElement('option');node.value=value;node.textContent=label;select.append(node);}
 function options(select,values,current){select.replaceChildren();option(select,'','请选择');for(const v of values)option(select,v.id,v.label||v.id);if(current&&!values.some(v=>v.id===current))option(select,current,`${current}（当前不可用）`);select.value=current||'';}
@@ -49,6 +49,7 @@ function renderTasks(){
   for(const task of tasks.filter(t=>!t.archived||$('show-archived').checked)){const b=document.createElement('button');b.className='task';const title=document.createElement('strong');title.textContent=task.config.name||'未命名任务';const status=document.createElement('small');status.textContent=`${task.archived?'已归档':task.enabled?'已启用':'停用'} · ${task.config.frequency==='weekly'?'每周':'每日'} ${task.config.time}`;b.append(title,status);b.onclick=()=>fill(task);$('tasks').append(b);}
 }
 function taskState(){
+  $('delete-task').disabled=!selected?.archived;
   $('archive').disabled=!selected||selected.archived;$('save').disabled=!!selected?.archived;
   $('toggle').disabled=!selected||selected.archived;$('generate').disabled=!!selected?.archived;
   $('toggle').textContent=selected?.enabled?'停用任务':'启用任务';
@@ -85,6 +86,35 @@ $('refresh').onclick=()=>initialized?guard(reload,$('refresh')):initializeView()
 const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget'};
 $('settings-save').onclick=()=>guard(async()=>{const values={};for(const [id,key] of Object.entries(settingFields))values[key]=Number($(id).value);await api('settings',{values});message('全局设置已保存。');},$('settings-save'));
 $('archive').onclick=()=>guard(async()=>{if(!selected)return;await api('archive',{id:selected.id,version:selected.version});fill(null);await reload();message('任务已归档，执行记录保留。');},$('archive'));
+function deleteReady(){ $('delete-confirm').disabled=deleting||!deletionPreview||deletionPreview.busy||!deletionPreview.archived||$('delete-confirmation').value!=='彻底删除'; }
+$('delete-task').onclick=()=>guard(async()=>{
+  if(!selected)return;
+  deletionPreview=await api('delete_preview',{id:selected.id});
+  const p=deletionPreview;
+  $('delete-name').textContent=`任务：${p.name||'未命名任务'}`;
+  $('delete-counts').textContent=`将清除 ${p.runs} 条执行记录、${p.lists} 份候选清单；关联 ${p.unique_reminders} 条独有提醒、${p.shared_reminders} 条共享提醒。`;
+  $('delete-legacy').textContent=p.legacy_reply_texts?`同时清空该收件人 ${p.legacy_reply_texts} 条无法归属任务的旧操作反馈文本，保留防重 ID。其他任务的配置、简报和提醒不受影响。`:'';
+  $('delete-reminders').checked=p.cancel_unique;
+  $('delete-reminders').disabled=p.resuming||!p.unique_reminders;
+  $('delete-shared').textContent=p.resuming?'此前删除尚未完成，将沿用原提醒处理方式继续；已取消的提醒不会重建。':`共享提醒始终保留，仅解除与本任务的关联。保留的独有提醒也会解除关联，继续独立存在。`;
+  $('delete-confirmation').value='';
+  $('delete-error').textContent=p.busy?'仍有生成、发送或私聊操作正在进行，请稍后重新打开确认页。':'';
+  deleteReady();$('delete-dialog').showModal();
+},$('delete-task'));
+$('delete-confirmation').oninput=deleteReady;
+$('delete-cancel').onclick=()=>{if(!deleting)$('delete-dialog').close();};
+$('delete-dialog').oncancel=e=>{if(deleting)e.preventDefault();};
+$('delete-confirm').onclick=async()=>{
+  if($('delete-confirm').disabled)return;
+  deleting=true;deleteReady();$('delete-cancel').disabled=true;$('delete-reminders').disabled=true;
+  try{
+    await api('delete',{id:deletionPreview.id,version:deletionPreview.version,token:deletionPreview.token,
+      cancel_unique:$('delete-reminders').checked,confirmation:$('delete-confirmation').value});
+    $('delete-dialog').close();deletionPreview=null;fill(null);await reload();
+    message('任务及其内容已彻底删除。已保留最小防重凭据；提醒按确认的方式处理。');
+  }catch(e){$('delete-error').textContent=(e.message||String(e))+' 请关闭并重新打开确认页后重试。';deletionPreview=null;}
+  finally{deleting=false;$('delete-cancel').disabled=false;deleteReady();}
+};
 $('more').onclick=()=>{page++;guard(records);};
 $('show-archived').onchange=renderTasks;
 $('toggle').onclick=()=>guard(async()=>{if(!selected)return;selected=await api('enable',{id:selected.id,version:selected.version,enabled:!selected.enabled});taskState();await reload();message(selected.enabled?'已启用，从下一计划时点开始执行。':'已停用，既有提醒保持不变。');},$('toggle'));
