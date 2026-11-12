@@ -292,3 +292,10 @@
 - README 混合 v0.3.0 状态与 v0.3.2 补丁说明，使用说明首页仍标 v0.2.0；当前 metadata 为 v0.3.2，最新验证为 72 Python / 17 隔离原生 / 3 bridge。
 - 源码确认：简报使用 Basic 调度，逐条提醒使用原生 Active Agent；只读群历史、完整 UMO、默认参数及彻底删除流程与重写说明一致。
 - GitHub 连接器确认现有仓库 private；远端 main 为 fb7f859，本地比其领先 9 个开发提交。提权后的 Git 非交互认证可用，本轮可直接推送并保留原提交历史。
+
+## 公开说明参考（2026-11-12）
+- AstrBot 官方插件使用指南支持从仓库 URL 安装，公开 README 可优先给出这一入口，并说明不等于已上架插件市场。
+- 来源：https://github.com/AstrBotDevs/AstrBot/wiki/en-use-plugin 。许可证选项说明参考 https://choosealicense.com/licenses/mit/ 与 https://choosealicense.com/licenses/agpl-3.0/ ，等待用户选择。
+- README 参考仓库：Soulter/helloworld（AstrBot 官方指南所链模板）、XTsat/astrbot_plugin_llm_balance（能力分组、配置表与使用示例）。仅参考文档组织，不复制其代码和项目规则。
+- 初次探测 AstrBotDevs/helloworld 返回 404，核对官方指南后修正为 Soulter/helloworld。
+- 用户明确选择 MIT，版权主体使用 metadata 中作者 WinterMoonlight，年份 2026。
