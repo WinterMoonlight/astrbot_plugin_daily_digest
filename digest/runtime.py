@@ -14,8 +14,9 @@ def display_time(value, zone='Asia/Shanghai'):
 
 
 class Runtime:
-    def __init__(self, store, service, sender):
+    def __init__(self, store, service, sender, native=None):
         self.store, self.service, self.sender = store, service, sender
+        self.native = native
         self.wake = asyncio.Event()
         self.stopping = False
         self.worker = None
@@ -36,6 +37,8 @@ class Runtime:
     async def tick(self, restart=False, now=None):
         async with self.tick_lock:
             now = now or utcnow()
+            if self.native:
+                await self.native.sync()
             await self.store.schedule(now, restart)
             await self.reconcile(now, restart)
             self.service.wake.set()
@@ -138,6 +141,8 @@ class Runtime:
                     record['state']='expired'
                 put(db,'list',record)
             for reminder in entities(db,'reminder'):
+                if reminder.get('native_owned'):
+                    continue
                 owner=f"{reminder['id']}:{reminder['version']}"
                 rows=db.execute("SELECT * FROM outbox WHERE owner=? AND channel='reminder'",(owner,)).fetchall()
                 if reminder['state'] in ('cancelled','missed','acknowledged'):
@@ -195,6 +200,8 @@ class Runtime:
                 elif row['channel']=='reminder':
                     ident,version=row['owner'].split(':')
                     reminder=entity(db,'reminder',ident)
+                    if reminder.get('native_owned'):
+                        continue
                     if reminder['version']!=int(version) or reminder['state'] not in ('scheduled','retry_wait') or parse_time(reminder['event_at'])<=now:
                         continue
                 elif row['channel']=='change':

@@ -210,12 +210,26 @@ async def probe(root):
     await plugin.on_private(event)
     reminders=await plugin.store.call(lambda db:entities(db,'reminder'))
     assert len(reminders)==1 and len(stopped)==2
+    native_id=reminders[0]['native_job_id']
+    native_job=next(j for j in await manager.list_jobs() if j.job_id==native_id)
+    assert native_job.job_type=='active_agent' and native_job.run_once and native_job.persistent
+    from astrbot.dashboard.services.cron_service import CronService
+    cron_service=CronService(SimpleNamespace(cron_manager=manager))
+    changed_at=(utcnow()+timedelta(hours=2)).isoformat()
+    await cron_service.update_job(native_id,{'run_at':changed_at,'enabled':False})
+    await plugin.native_reminders.sync()
+    synced=(await plugin.store.call(lambda db:entities(db,'reminder')))[0]
+    assert synced['state']=='native_paused' and synced['remind_at']==changed_at
     response[0]=json.dumps({'action':'ignore'})
     event.message_obj.message_id='user-2';event.message_str='今天天气怎样'
     await plugin.on_private(event)
     assert len(stopped)==2,'unrelated chat should not be stopped'
     await plugin.terminate()
     assert not plugin.initialized
+    assert len(await manager.list_jobs())==1, 'native reminder must survive plugin unload'
+    await manager.delete_job(native_id)
+    await plugin.native_reminders.sync()
+    assert (await plugin.store.call(lambda db:entities(db,'reminder')))[0]['state']=='native_absent'
     assert not await manager.list_jobs()
     manager.scheduler.shutdown(wait=False)
     await asyncio.sleep(0.02)
@@ -230,6 +244,7 @@ async def probe(root):
             'plugin_cron_rebuild': 'pass', 'plugin_send_receipt_classification': 'pass',
             'plugin_entry_lifecycle': 'pass',
             'plugin_scheduled_pipeline': 'pass', 'plugin_private_reply_pipeline': 'pass',
+            'native_reminder_create_edit_pause_delete_persist': 'pass',
             'live_model_calls': 0, 'qq_messages': 0}
 
 

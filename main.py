@@ -13,6 +13,7 @@ from .digest.service import Service
 from .digest.storage import Conflict, Store
 from .digest.runtime import Runtime
 from .digest.interactions import Interactions, Interpreter
+from .digest.native_reminders import NativeReminders
 
 PLUGIN_NAME = 'astrbot_plugin_daily_digest'
 
@@ -26,7 +27,8 @@ class DailyDigest(Star):
         self.models = NativeModels(context)
         self.onebot = OneBot(context)
         self.service = Service(self.store, Generator(self.models, NativeHistory(context)))
-        self.runtime = Runtime(self.store, self.service, self.onebot)
+        self.native_reminders = NativeReminders(self.store, context.cron_manager)
+        self.runtime = Runtime(self.store, self.service, self.onebot, self.native_reminders)
         self.service.on_ready = self.runtime.freeze
         self.interactions = Interactions(self.store, Interpreter(self.models), self.runtime)
         self.clock = NativeClock(context.cron_manager)
@@ -129,6 +131,7 @@ class DailyDigest(Star):
                 self.runtime.wake.set()
                 data = {'resolved':True}
             elif action == 'related':
+                await self.native_reminders.sync()
                 data = await self.store.related(payload['id'])
             elif action == 'reminder':
                 data = {'message':await self.interactions.manage(payload['id'],payload['operation'],

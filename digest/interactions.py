@@ -59,7 +59,8 @@ def resolve_time(intent, event_at, lead, now):
 class Interactions:
     def __init__(self, store, interpreter, runtime):
         self.store,self.interpreter,self.runtime=store,interpreter,runtime
-        self.lock=asyncio.Lock()
+        self.native=runtime.native
+        self.lock=self.native.lock if self.native else asyncio.Lock()
 
     async def context(self,recipient,quote=None):
         def read(db):
@@ -97,6 +98,8 @@ class Interactions:
         if not message_id or not text.strip():
             return False
         async with self.lock:
+            if self.native:
+                await self.native.sync(locked=True)
             context=await self.context(recipient,quote)
             if not any(context[k] for k in ('list','reminder','change')):
                 return False
@@ -129,10 +132,10 @@ class Interactions:
                     raise ValueError('有多项待确认操作，请写出提醒确认编号')
                 if intent.get('action') in ('modify','cancel') and len(scoped['reminder'])!=1:
                     raise ValueError('有多个提醒，请写出完整事项名称或提醒编号')
-                def apply(db):
-                    answer=self.apply(db,recipient,intent,scoped)
-                    self.reply(db,recipient,str(message_id),answer)
-                await self.store.call(apply)
+                answer=await self.store.call(lambda db:self.apply(db,recipient,intent,scoped))
+                if self.native:
+                    answer=await self.native.feedback(answer,recipient,locked=True)
+                await self.store.call(lambda db:self.reply(db,recipient,str(message_id),answer))
             except asyncio.CancelledError:
                 raise
             except (ValueError,KeyError,TypeError,RuntimeError,TimeoutError) as exc:
@@ -226,7 +229,10 @@ class Interactions:
             'task_ids':[record['task_id']],'list_ids':[record['id']],'title':candidate['title'],
             'sources':candidate['sources'],'place':candidate.get('place',''),'event_at':event.isoformat(),
             'remind_at':remind.isoformat(),'lead_minutes':lead,'timezone':record['config']['timezone'],
-            'state':'scheduled','version':1,'created_at':now.isoformat()}
+            'state':'scheduled','version':1,'created_at':now.isoformat(),
+            'immediate':bool(intent.get('immediate'))}
+        if self.native:
+            reminder['native_owned']=True
         put(db,'reminder',reminder)
         return f"已添加 {reminder['title']}（{reminder['id'][:8]}），提醒时间：{display_time(reminder['remind_at'],reminder['timezone'])}"
 
@@ -242,6 +248,13 @@ class Interactions:
         return f"{title}：提醒时间已过，尚未执行。请回复“确认 {change['id'][:8]}，现在提醒”或指定新的提醒时间。"
 
     def modify(self,db,reminder,intent,now,settings,confirmed=False):
+        if reminder.get('native_owned'):
+            if reminder['state']=='native_absent':
+                raise ValueError('原生任务已结束或已删除，请在未来任务核查；不会自动重新创建')
+            if reminder.get('native_session',reminder['recipient'])!=reminder['recipient']:
+                raise ValueError('原生投递目标已变化，请在未来任务管理此提醒')
+            if reminder.get('native_run_once') is False:
+                raise ValueError('原生任务已改为周期任务，请在未来任务管理此提醒')
         if reminder['state']=='cancelled':
             return '该提醒已经取消。'
         if db.execute("SELECT 1 FROM outbox WHERE owner=? AND state='sending'",(f"{reminder['id']}:{reminder['version']}",)).fetchone():
@@ -262,11 +275,17 @@ class Interactions:
             if old['id']!=reminder['id'] and old['title']==reminder['title'] and old['event_at']==event.isoformat() and old['state'] not in ('cancelled','missed'):
                 raise ValueError('该事项时间已有另一个提醒，请先明确保留哪一条')
         reminder.update(event_at=event.isoformat(),remind_at=remind.isoformat(),lead_minutes=lead,
-                        state='scheduled',version=reminder['version']+1)
+                        state='scheduled',version=reminder['version']+1,immediate=bool(intent.get('immediate')))
         put(db,'reminder',reminder)
         return f"已修改 {reminder['title']}，提醒时间：{display_time(reminder['remind_at'],reminder['timezone'])}"
 
     async def manage(self,reminder_id,action,version,values=None):
+        async with self.lock:
+            if self.native:
+                await self.native.sync(locked=True)
+            return await self._manage(reminder_id,action,version,values)
+
+    async def _manage(self,reminder_id,action,version,values=None):
         if action not in ('modify','cancel'):
             raise ValueError('管理操作必须为修改或取消')
         values=values or {}
@@ -279,11 +298,19 @@ class Interactions:
             settings=json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
             return self.modify(db,reminder,{'action':action,'reminder_id':reminder_id,**values},utcnow(),settings)
         result=await self.store.call(apply)
+        if self.native:
+            result=await self.native.feedback(result,locked=True)
         await self.runtime.reconcile()
         self.runtime.wake.set()
         return result
 
     async def manage_change(self,change_id,accept,values=None):
+        async with self.lock:
+            if self.native:
+                await self.native.sync(locked=True)
+            return await self._manage_change(change_id,accept,values)
+
+    async def _manage_change(self,change_id,accept,values=None):
         if type(accept) is not bool:
             raise ValueError('确认状态必须为布尔值')
         values=values or {}
@@ -295,6 +322,8 @@ class Interactions:
             return self.apply(db,change['recipient'],{'action':'confirm' if accept else 'reject',
                                                      'change_id':change_id,**values},scope)
         result=await self.store.call(apply)
+        if self.native:
+            result=await self.native.feedback(result,locked=True)
         await self.runtime.reconcile()
         self.runtime.wake.set()
         return result
