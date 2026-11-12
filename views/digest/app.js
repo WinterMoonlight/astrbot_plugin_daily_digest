@@ -2,14 +2,13 @@ const $ = (id) => document.getElementById(id);
 const form = $('form');
 const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
 let selected = null, selectedRun = null, tasks = [], metadata = {models:[],personas:[],groups:[]}, page = 1, pollToken = 0;
-let bridge;
+let bridge, initialized = false;
 const stateNames={pending:'待处理',scheduled:'等待提醒',retry_wait:'等待重试',sending:'发送中',acknowledged:'已确认发送',failed:'失败',unknown:'结果未知',held:'已停止',active:'可选择',awaiting_delivery:'等待询问成功',awaiting_choice:'等待指定时间',expired:'已过期',superseded:'已被新清单替换',cancelled:'已取消',missed:'已错过',confirmed:'已确认',rejected:'已拒绝'};
 const stateName=state=>stateNames[state]||state;
 function message(text, error=false){$('message').textContent=text;$('message').className=error?'error':'';}
 async function api(action, values={}){
-  const result = await bridge.apiPost('rpc', {action,...values});
-  if (!result?.ok) throw new Error(result?.message || result?.error || '操作失败');
-  return result.data;
+  // AstrBot's host unwraps response.data and rejects failed HTTP requests.
+  return await bridge.apiPost('rpc', {action,...values});
 }
 async function guard(fn, button){
   if(button) button.disabled=true;
@@ -55,7 +54,7 @@ function taskState(){
   $('toggle').textContent=selected?.enabled?'停用任务':'启用任务';
   $('task-status').textContent=selected?.archived?'已归档':selected?.enabled?'已启用':'停用';
 }
-async function reload(){const data=await api('list');tasks=data.tasks;renderTasks();for(const [id,key] of Object.entries(settingFields))$(id).value=data.settings[key];if(data.runtime_error)message('投递执行器异常：'+data.runtime_error,true);}
+async function reload(){const data=await api('list');tasks=data.tasks;renderTasks();for(const [id,key] of Object.entries(settingFields))$(id).value=data.settings[key];if(data.runtime_error)message('投递执行器异常：'+data.runtime_error,true);return data;}
 async function save(){
   const saved=await api('save',{id:selected?.id,version:selected?.version,config:readConfig()});
   selected=saved;$('task-title').textContent=saved.config.name||'未命名任务';$('archive').disabled=false;
@@ -82,7 +81,7 @@ form.elements.frequency.onchange=()=>{$('weekdays').hidden=form.elements.frequen
 $('group-picker').onchange=()=>{const value=$('group-picker').value;if(value){const groups=new Set(readConfig().groups);groups.add(value);form.elements.groups.value=[...groups].join('\n');$('group-picker').value='';}};
 form.onsubmit=e=>{e.preventDefault();guard(save,e.submitter);};
 $('new').onclick=()=>fill(null);
-$('refresh').onclick=()=>guard(reload,$('refresh'));
+$('refresh').onclick=()=>initialized?guard(reload,$('refresh')):initializeView();
 const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget'};
 $('settings-save').onclick=()=>guard(async()=>{const values={};for(const [id,key] of Object.entries(settingFields))values[key]=Number($(id).value);await api('settings',{values});message('全局设置已保存。');},$('settings-save'));
 $('archive').onclick=()=>guard(async()=>{if(!selected)return;await api('archive',{id:selected.id,version:selected.version});fill(null);await reload();message('任务已归档，执行记录保留。');},$('archive'));
@@ -119,9 +118,14 @@ $('generate').onclick=()=>guard(async()=>{
   message('预览已入队。');
   while(token===pollToken){const current=await api('run',{id:run.id});showRun(current);if(!['queued','generating'].includes(current.status)){message(current.status==='failed'?'预览失败，请查看执行详情。':'预览处理结束，请查看下方结果。');break;}await new Promise(resolve=>setTimeout(resolve,1000));}
 },$('generate'));
-await guard(async()=>{
+async function initializeView(){await guard(async()=>{
+  message('正在加载任务与可选配置…');
   bridge=window.AstrBotPluginView;if(!bridge)throw new Error('请从 AstrBot 插件详情打开此页面。');
-  await bridge.ready();await reload();metadata=await api('metadata');
+  await bridge.ready();const initial=await reload();metadata=await api('metadata');
+  $('group-picker').replaceChildren();option($('group-picker'),'','选择群后添加');
   for(const group of metadata.groups)option($('group-picker'),group.umo,`${group.name} · ${group.id}`);
-  fill(null);if(metadata.warnings.length)message(metadata.warnings.join('；'),true);
-});
+  fill(null);initialized=true;document.querySelector('.layout').inert=false;
+  const warnings=[...metadata.warnings];if(initial.runtime_error)warnings.push('投递执行器异常：'+initial.runtime_error);
+  message(warnings.join('；'),warnings.length>0);
+},$('refresh'));}
+await initializeView();

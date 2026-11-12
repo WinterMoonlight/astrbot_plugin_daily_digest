@@ -30,6 +30,7 @@
       case 'reminder':if(payload.operation==='cancel')reminder.state='cancelled';else Object.assign(reminder,payload.values);reminder.version++;data={message:'模拟提醒已更新'};break;
       default:throw new Error('Unexpected fixture operation');
     }
-    return {ok:true,data:structuredClone(data)};
+    // Match the native Plugin View bridge: the host already unwraps data.
+    return structuredClone(data);
   }};
 })();
