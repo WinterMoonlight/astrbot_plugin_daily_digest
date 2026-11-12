@@ -1,0 +1,36 @@
+# Local credentials and server details
+/服务器信息/
+/.local/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Local agent tools
+/.codex/
+/.agents/
+
+# Python and build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Runtime data
+/data/
+*.log
+*.sqlite*
+*.db
+node_modules/
