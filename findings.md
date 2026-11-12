@@ -299,3 +299,4 @@
 - README 参考仓库：Soulter/helloworld（AstrBot 官方指南所链模板）、XTsat/astrbot_plugin_llm_balance（能力分组、配置表与使用示例）。仅参考文档组织，不复制其代码和项目规则。
 - 初次探测 AstrBotDevs/helloworld 返回 404，核对官方指南后修正为 Soulter/helloworld。
 - 用户明确选择 MIT，版权主体使用 metadata 中作者 WinterMoonlight，年份 2026。
+- 发布结果：仓库 private=false、visibility=public，匿名 GitHub API 可访问，LICENSE 被识别为 MIT。

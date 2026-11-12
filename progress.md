@@ -234,3 +234,4 @@
 - 用户已选择 MIT。全历史检查覆盖 15 个提交、157 个唯一文本对象，未命中服务器 IP、私钥、常见 Token、真实测试 QQ/群号或凭据文件路径；提交邮箱使用 GitHub noreply 地址。
 - 已重写面向公开用户的 README：徽章、功能表、仓库链接安装、快速开始、配置、日程回复示例、真实常见问题、验证限制、贡献入口与致谢；新增标准 MIT LICENSE（2026 WinterMoonlight）。未修改插件代码。
 - 公开版 README 链接/锚点、版本及许可证检查通过；许可证采用 OSI 标准 MIT 文本。GitHub 连接器无修改仓库可见性的工具，改用系统已有 Git 凭据通过 GitHub 官方 REST API 设置 public；凭据仅在进程内使用，不输出、不写文件。
+- a6bac9b 已推送：公开 README + MIT LICENSE。随后 GitHub 官方 API 已将仓库改为 public；无认证请求可读仓库，GitHub 许可证检测结果为 MIT。没有改动代码、服务器或试跑状态。
