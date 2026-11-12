@@ -36,3 +36,14 @@ build/
 node_modules/
 /.playwright-cli/
 /output/playwright/
+
+# Local planning and session notes
+/task_plan.md
+/findings.md
+/progress.md
+/续接摘要.md
+
+# Local development requirements and reports
+/AstrBot多群日报插件开发需求.md
+/整体开发方案.md
+/接口验证报告.md

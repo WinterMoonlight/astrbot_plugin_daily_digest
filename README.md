@@ -136,8 +136,6 @@ https://github.com/WinterMoonlight/astrbot_plugin_daily_digest
 - v0.3.2 最近一轮通过 **72 项 Python 测试、17 项隔离原生接口检查和 3 项前端 bridge 回归**。隔离测试使用模拟模型／消息客户端，不产生真实调用。
 - 真实多群内容质量、长输入／长输出投递、故障补发及带待处理状态的重启等场景仍未全部完成实机验收。模型摘要及日期识别请结合原消息核对。
 
-详细证据及限制见[接口验证报告](接口验证报告.md)。
-
 ## 开发与反馈
 
 欢迎通过 [Issues](https://github.com/WinterMoonlight/astrbot_plugin_daily_digest/issues) 反馈问题，或提交 Pull Request。报告问题时请附插件／AstrBot 版本、复现步骤、预期与实际表现，以及去除密钥、QQ 号和私人消息后的必要日志。
@@ -150,9 +148,7 @@ node --test tests/test_view_bridge.cjs
 node --check views/digest/app.js
 ```
 
-[使用说明](使用说明.md) · [开发需求](AstrBot多群日报插件开发需求.md) · [整体方案](整体开发方案.md) · [验证报告](接口验证报告.md)
-
-开发过程保留在 [计划](task_plan.md)、[发现](findings.md)、[进度](progress.md) 与[续接摘要](续接摘要.md)中；历史条目按当时版本记录，当前行为以本 README 与最新验证结果为准。
+详细操作见[使用说明](使用说明.md)。
 
 ## 致谢与许可证
 
