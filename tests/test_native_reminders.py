@@ -147,3 +147,31 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
         await self.store.call(attempted)
         await self.native.sync()
         self.assertEqual(self.manager.calls,0)
+
+    async def test_time_only_edit_preserves_native_note(self):
+        r=await self.create()
+        job=self.manager.jobs[r['native_job_id']]
+        job.payload={**job.payload,'note':'用户在未来任务中自定义的提醒说明'}
+        job.description='用户自定义说明'
+        job.timezone='UTC'
+        await self.native.sync()
+        r=(await self.reminders())[0]
+        await self.interactions.manage(r['id'],'modify',r['version'],{'lead_minutes':5})
+        self.assertEqual(job.payload['note'],'用户在未来任务中自定义的提醒说明')
+        self.assertEqual(job.description,'用户自定义说明')
+        self.assertEqual(job.timezone,'UTC')
+
+    async def test_event_date_edit_updates_native_event_details(self):
+        r=await self.create()
+        new_event=(utcnow()+timedelta(hours=5)).isoformat()
+        await self.interactions.manage(r['id'],'modify',r['version'],{'event_at':new_event})
+        self.assertIn(new_event,self.manager.jobs[r['native_job_id']].payload['note'])
+
+    async def test_mismatched_ownership_prevents_private_cancellation(self):
+        r=await self.create()
+        self.manager.jobs[r['native_job_id']].payload['digest_reminder_owner']='unrelated owner'
+        await self.native.sync()
+        r=(await self.reminders())[0]
+        answer=await self.interactions.manage(r['id'],'cancel',r['version'])
+        self.assertIn('未确认',answer)
+        self.assertEqual(len(self.manager.jobs),1)

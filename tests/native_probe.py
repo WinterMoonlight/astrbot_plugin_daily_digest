@@ -216,7 +216,8 @@ async def probe(root):
     from astrbot.dashboard.services.cron_service import CronService
     cron_service=CronService(SimpleNamespace(cron_manager=manager))
     changed_at=(utcnow()+timedelta(hours=2)).isoformat()
-    await cron_service.update_job(native_id,{'run_at':changed_at,'enabled':False})
+    await cron_service.update_job(native_id,{'run_at':changed_at,'enabled':False,
+                                            'note':'custom reminder note','timezone':'UTC'})
     await plugin.native_reminders.sync()
     synced=(await plugin.store.call(lambda db:entities(db,'reminder')))[0]
     assert synced['state']=='native_paused' and synced['remind_at']==changed_at
@@ -240,6 +241,8 @@ async def probe(root):
     await plugin.on_private(event)
     orphan=(await plugin.store.call(lambda db:entities(db,'reminder')))[0]
     assert orphan['lead_minutes']==15 and orphan['task_ids']==[] and orphan['state']=='native_paused'
+    edited_job=next(j for j in await manager.list_jobs() if j.job_id==native_id)
+    assert edited_job.payload['note']=='custom reminder note' and edited_job.timezone=='UTC'
     # A second synthetic task exercises optional native cancellation with the real CronJobManager.
     other=await plugin.service.save(TaskConfig(name='delete-cancel',groups=['probe:GroupMessage:1'],
         provider_id='primary',recipient='probe:FriendMessage:42'))
@@ -280,6 +283,7 @@ async def probe(root):
             'plugin_scheduled_pipeline': 'pass', 'plugin_private_reply_pipeline': 'pass',
             'native_reminder_create_edit_pause_delete_persist': 'pass',
             'native_task_deletion_keep_and_cancel': 'pass', 'orphan_reminder_private_command': 'pass',
+            'native_custom_note_and_timezone_preserved': 'pass',
             'live_model_calls': 0, 'qq_messages': 0}
 
 

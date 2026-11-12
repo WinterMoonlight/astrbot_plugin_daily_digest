@@ -1,5 +1,6 @@
 """Explicit task deletion, with durable progress for native reminder cancellation."""
 import hashlib
+import json
 
 from .domain import utcnow
 from .workflow_store import dump, entities, put
@@ -16,7 +17,7 @@ class TaskDeletion:
 
     def inspect(self, db, task_id):
         task = self.store.task(db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
-        runs = [dict(x) for x in db.execute('SELECT id,status FROM runs WHERE task_id=?', (task_id,))]
+        runs = [dict(x) for x in db.execute('SELECT id,status,snapshot FROM runs WHERE task_id=?', (task_id,))]
         run_ids = {r['id'] for r in runs}
         lists = [x for x in entities(db, 'list') if x['task_id'] == task_id]
         reminders = [x for x in entities(db, 'reminder') if task_id in self.task_links(x)]
@@ -27,9 +28,15 @@ class TaskDeletion:
         reminder_ids = {r['id'] for r in unique}
         refs = entities(db, 'interaction_refs')
         ref_by_id = {r['id']: r for r in refs}
-        recipients = {task['config']['recipient']} | {r['recipient'] for r in reminders}
+        recipients = ({task['config']['recipient']} | {r['recipient'] for r in reminders + lists + changes} |
+                      {json.loads(r['snapshot'])['config']['recipient'] for r in runs} |
+                      {r['recipient'] for r in refs if task_id in r.get('task_ids', [])})
+        recipients.discard('')
+        all_outbox = [dict(row) for row in db.execute('SELECT * FROM outbox')]
+        reply_text_owners = {r['owner'] for r in all_outbox if r['channel'] == 'reply' and r['body'] is not None}
         replies = []
-        for row in db.execute('SELECT recipient,message_id FROM interactions'):
+        legacy_reply_texts = 0
+        for row in db.execute('SELECT recipient,message_id,result FROM interactions'):
             if row['recipient'] not in recipients:
                 continue
             key = row['recipient'] + '/' + row['message_id']
@@ -37,8 +44,10 @@ class TaskDeletion:
             # User explicitly chose to clear unscoped legacy reply text for the recipient.
             if ref is None or task_id in ref.get('task_ids', []):
                 replies.append((row['recipient'], row['message_id'], key))
+                if ref is None and (row['result'] is not None or key in reply_text_owners):
+                    legacy_reply_texts += 1
         owners.update(key for _, _, key in replies)
-        outbox = [dict(row) for row in db.execute('SELECT * FROM outbox') if
+        outbox = [row for row in all_outbox if
                   row['task_id'] == task_id or row['owner'] in owners or
                   (row['channel'] == 'reminder' and row['owner'].split(':')[0] in reminder_ids)]
         busy = (any(r['status'] in ('queued', 'generating') for r in runs) or
@@ -52,7 +61,7 @@ class TaskDeletion:
         token = hashlib.sha256(dump(signature).encode()).hexdigest()
         return dict(task=task, runs=runs, lists=lists, reminders=reminders, unique=unique,
                     changes=changes, outbox=outbox, replies=replies, refs=refs, busy=bool(busy),
-                    token=token, journal=journal)
+                    token=token, journal=journal, legacy_reply_texts=legacy_reply_texts)
 
     @staticmethod
     def public(info):
@@ -62,8 +71,7 @@ class TaskDeletion:
                 'runs': len(info['runs']), 'lists': len(info['lists']),
                 'unique_reminders': len(info['unique']),
                 'shared_reminders': len(info['reminders']) - len(info['unique']),
-                'legacy_reply_texts': sum(1 for _, _, key in info['replies']
-                                         if not any(r['id'] == key for r in info['refs'])),
+                'legacy_reply_texts': info['legacy_reply_texts'],
                 'resuming': info['journal'] is not None,
                 'cancel_unique': bool(info['journal'] and info['journal']['cancel_unique'])}
 
@@ -151,6 +159,7 @@ class TaskDeletion:
             if not remaining:
                 r['interaction_config'] = {k: task['config'][k] for k in
                                           ('provider_id', 'persona_id', 'recipient', 'timezone')}
+                r['interaction_config'].update(recipient=r['recipient'], timezone=r['timezone'])
             r.pop('delete_pending_task', None)
             put(db, 'reminder', r)
             db.execute("UPDATE entities SET task_id=? WHERE kind='reminder' AND id=?", (r['task_id'], r['id']))
@@ -158,6 +167,7 @@ class TaskDeletion:
             put(db, 'deleted_list', {'id': record['id'], 'recipient': record['recipient']})
             db.execute("DELETE FROM entities WHERE kind='list' AND id=?", (record['id'],))
         for record in info['changes']:
+            put(db, 'deleted_change', {'id': record['id'], 'recipient': record['recipient']})
             db.execute("DELETE FROM entities WHERE kind='change' AND id=?", (record['id'],))
         for row in info['outbox']:
             # Retained reminders remain independent business data, not task execution history.

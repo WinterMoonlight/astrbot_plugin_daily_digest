@@ -71,6 +71,12 @@ class WorkflowStore:
             for column in ('sent_at','ack_at'):
                 if column not in {r[1] for r in db.execute('PRAGMA table_info(outbox)')}:
                     db.execute(f'ALTER TABLE outbox ADD COLUMN {column} TEXT')
+            # v0.3.1 retained quote receipts but did not mark deleted change proposals.
+            # Only already-scrubbed, orphaned change rows qualify for this safe backfill.
+            for row in db.execute("""SELECT DISTINCT owner,recipient FROM outbox o
+                    WHERE channel='change' AND body IS NULL AND NOT EXISTS
+                    (SELECT 1 FROM entities e WHERE e.kind='change' AND e.id=o.owner)""").fetchall():
+                put(db,'deleted_change',{'id':row['owner'],'recipient':row['recipient']})
             db.execute("UPDATE outbox SET state='unknown',error='发送中断，需核对回执' WHERE state='sending'")
             db.execute("UPDATE interactions SET state='interrupted' WHERE state='processing'")
             for row in db.execute("SELECT recipient,message_id FROM interactions WHERE state='interrupted'").fetchall():

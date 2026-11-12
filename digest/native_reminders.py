@@ -112,6 +112,9 @@ class NativeReminders:
             r.pop('native_error', None)
             await self.save(r)
             return
+        if ((job.payload or {}).get('digest_reminder_owner') != self.OWNER or
+                (job.payload or {}).get('digest_reminder_id') != r['id']):
+            raise ValueError('原生任务归属已变化，不能修改或取消')
         if r.get('native_version') != r['version']:
             if r['state'] == 'cancelled':
                 await self.manager.delete_job(native_id)
@@ -120,11 +123,17 @@ class NativeReminders:
                 r.pop('native_error', None)
                 await self.save(r)
                 return
-            payload = {**(job.payload or {}), **self.payload(r)}
+            event_changed = r['event_at'] != r.get('native_event_at', r['event_at'])
+            payload = {**self.payload(r), **(job.payload or {}),
+                       'run_at': r['remind_at'], 'digest_reminder_version': r['version']}
+            description = job.description
+            if event_changed:
+                payload['note'] = self.payload(r)['note']
+                description = payload['note']
             if r.get('immediate'):
                 payload['run_at'] = (utcnow() + timedelta(seconds=3)).isoformat()
             job = await self.manager.update_job(native_id, payload=payload,
-                description=payload['note'], timezone=r['timezone'], cron_expression=None,
+                description=description, timezone=r['timezone'], cron_expression=None,
                 run_once=True, enabled=job.enabled)
             r['native_version'] = r['version']
         fingerprint = self.fingerprint(job)
@@ -136,6 +145,8 @@ class NativeReminders:
         r['native_enabled'] = job.enabled
         r['native_run_once'] = job.run_once
         r['native_name'] = job.name
+        r['native_event_at'] = r['event_at']
+        r['timezone'] = job.timezone or r['timezone']
         r['native_status'] = getattr(job, 'last_status', None)
         r['native_schedule'] = payload.get('run_at') if job.run_once else job.cron_expression
         r['native_session'] = payload.get('session')

@@ -65,7 +65,8 @@ class Interactions:
     async def context(self,recipient,quote=None):
         def read(db):
             result={k:entities(db,k,recipient) for k in ('list','reminder','change')}
-            result['deleted']=entities(db,'deleted_list',recipient)+entities(db,'deleted_reminder',recipient)
+            result['deleted']=[x for kind in ('deleted_list','deleted_reminder','deleted_change')
+                               for x in entities(db,kind,recipient)]
             result['quoted']=[]
             if quote:
                 result['quoted']=[dict(r) for r in db.execute(
@@ -112,7 +113,7 @@ class Interactions:
                 def reject_deleted(db):
                     db.execute('INSERT INTO interactions(recipient,message_id,state,created_at) VALUES (?,?,?,?)',
                                (recipient,str(message_id),'processing',utcnow().isoformat()))
-                    self.reply(db,recipient,str(message_id),'该清单或提醒所属记录已删除，不会按其他清单重新执行。')
+                    self.reply(db,recipient,str(message_id),'该清单、提醒或变更确认所属记录已删除，不会按其他事项重新执行。')
                 await self.store.call(reject_deleted)
                 self.runtime.wake.set()
                 return True

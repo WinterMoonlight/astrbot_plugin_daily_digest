@@ -229,3 +229,67 @@ class DeletionTests(unittest.IsolatedAsyncioTestCase):
         await self.remove()
         await self.runtime.freeze('a-run-that-was-deleted')
         self.assertEqual(await self.store.list_tasks(True),[])
+
+    async def test_deleted_change_quote_never_confirms_another_change(self):
+        r=await self.create()
+        other=await self.store.save_task(replace(config(),name='other task'))
+        old_change,new_change=uid(),uid()
+        def seed(db):
+            for ident,task_id in [(old_change,self.task['id']),(new_change,other['id'])]:
+                put(db,'change',{'id':ident,'task_id':task_id,'recipient':r['recipient'],
+                    'state':'pending','proposal':{'action':'cancel','reminder_id':r['id'],'version':r['version']}})
+            outgoing(db,old_change,'change',r['recipient'],'old proposal',task_id=self.task['id'])
+            db.execute("UPDATE outbox SET state='acknowledged',receipt='old-change-quote' WHERE owner=?",(old_change,))
+        await self.store.call(seed)
+        await self.archived()
+        await self.remove()
+        self.parser.intent={'action':'confirm','change_id':new_change}
+        calls=self.parser.calls
+        await self.interactions.handle(r['recipient'],uid(),'确认',quote='old-change-quote')
+        self.assertEqual(self.parser.calls,calls,'deleted confirmation quotes must be rejected before model parsing')
+        self.assertEqual(await self.store.call(lambda db:entity(db,'change',new_change)['state']),'pending')
+        self.assertEqual(len(self.manager.jobs),1)
+
+    async def test_prior_recipient_text_is_scrubbed_after_task_recipient_changes(self):
+        await self.formal()
+        old_recipient=config().recipient
+        def seed(db):
+            db.execute('INSERT INTO interactions VALUES (?,?,?,?,?)',(old_recipient,'old-recipient-reply','done','sensitive old reply',utcnow().isoformat()))
+            outgoing(db,old_recipient+'/old-recipient-reply','reply',old_recipient,'sensitive old reply')
+        await self.store.call(seed)
+        current=await self.store.get_task(self.task['id'])
+        await self.store.save_task(replace(config(),recipient='bot:FriendMessage:987'),current['id'],current['version'])
+        await self.archived()
+        await self.remove()
+        row=await self.store.call(lambda db:db.execute("SELECT result FROM interactions WHERE message_id='old-recipient-reply'").fetchone())
+        self.assertIsNone(row['result'])
+        body=await self.store.call(lambda db:db.execute('SELECT body FROM outbox WHERE owner=?',(old_recipient+'/old-recipient-reply',)).fetchone()[0])
+        self.assertIsNone(body)
+
+    async def test_upgrade_backfills_deleted_change_quotes_without_active_changes(self):
+        removed,active=uid(),uid()
+        def seed(db):
+            for ident in (removed,active):
+                outgoing(db,ident,'change',config().recipient,'previous proposal')
+            db.execute("UPDATE outbox SET body=NULL,state='held' WHERE channel='change'")
+            put(db,'change',{'id':active,'recipient':config().recipient,'task_id':self.task['id'],'state':'pending'})
+        await self.store.call(seed)
+        await self.store.initialize()
+        records=await self.store.call(lambda db:entities(db,'deleted_change'))
+        self.assertEqual([x['id'] for x in records],[removed])
+
+    async def test_legacy_reply_count_excludes_already_scrubbed_text(self):
+        await self.store.call(lambda db:db.execute('INSERT INTO interactions VALUES (?,?,?,?,?)',
+                             (config().recipient,'scrubbed','done',None,utcnow().isoformat())))
+        await self.archived()
+        self.assertEqual((await self.deletion.preview(self.task['id']))['legacy_reply_texts'],0)
+
+    async def test_retained_reminder_keeps_its_own_recipient_and_timezone(self):
+        r=await self.create()
+        current=await self.store.get_task(self.task['id'])
+        await self.store.save_task(replace(config(),recipient='bot:FriendMessage:987',timezone='UTC'),current['id'],current['version'])
+        await self.archived()
+        await self.remove()
+        orphan=(await self.reminders())[0]
+        self.assertEqual(orphan['interaction_config']['recipient'],r['recipient'])
+        self.assertEqual(orphan['interaction_config']['timezone'],r['timezone'])
