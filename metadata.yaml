@@ -1,0 +1,6 @@
+name: astrbot_plugin_daily_digest
+display_name: 多群每日简报
+desc: 多任务群消息简报。当前开发版支持任务配置与无投递预览，正式调度及提醒尚未开放。
+version: v0.1.0
+author: WinterMoonlight
+repo: https://github.com/WinterMoonlight/astrbot_plugin_daily_digest

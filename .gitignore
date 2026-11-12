@@ -34,3 +34,5 @@ build/
 *.sqlite*
 *.db
 node_modules/
+/.playwright-cli/
+/output/playwright/
