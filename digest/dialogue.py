@@ -1,11 +1,10 @@
-"""Receipt-driven, bounded reply windows and isolated clarification history."""
+"""Receipt-driven reply quotas and isolated clarification history."""
 from datetime import timedelta
 
 from .domain import parse_time, utcnow
 from .workflow_store import entities, entity, put
 
 
-DEFAULT_WINDOW_MINUTES = 5
 DEFAULT_MESSAGE_LIMIT = 3
 MAX_TURNS = 12
 MAX_HISTORY_CHARS = 12000
@@ -50,8 +49,7 @@ def valid(record, context, now):
 
 
 def active(record, context, now, received_at=None, *, check_limit=True):
-    return (record['state'] == 'active' and record.get('expires_at') is not None and
-            parse_time(record['expires_at']) > now and
+    return (record['state'] == 'active' and record.get('opened_at') is not None and
             (received_at is None or parse_time(record['opened_at']) <= received_at) and
             (not check_limit or record['remaining'] > 0) and valid(record, context, now))
 
@@ -74,8 +72,7 @@ def queue(db, owner, channel, recipient, scope, settings, turns=None):
         'id': ident, 'recipient': recipient, 'owner': owner, 'channel': channel,
         'refs': references(scope), 'task_ids': sorted(task_ids), 'turns': turns,
         'state': 'awaiting_delivery', 'created_at': utcnow().isoformat(),
-        'opened_at': None, 'expires_at': None,
-        'window_minutes': settings.get('reply_window_minutes', DEFAULT_WINDOW_MINUTES),
+        'opened_at': None,
         'remaining': settings.get('reply_message_limit', DEFAULT_MESSAGE_LIMIT),
     })
 
@@ -111,13 +108,14 @@ def reconcile(db, now):
                 continue
             opened = max(parse_time(row['ack_at'] or row['created_at']) for row in rows)
             record['opened_at'] = opened.isoformat()
-            record['expires_at'] = (opened + timedelta(minutes=record['window_minutes'])).isoformat()
             record['state'] = 'active'
             changed = True
         recipient = record['recipient']
         if recipient not in contexts:
             contexts[recipient] = {kind: entities(db, kind, recipient) for kind in KINDS}
-        if parse_time(record['expires_at']) <= now or not valid(record, contexts[recipient], now):
+        # Exhausted quotas stop automatic routing, but an explicit quote can still
+        # use the bound history until the business records expire or the user finishes.
+        if not valid(record, contexts[recipient], now):
             record['state'] = 'expired'
             record['turns'] = []
             changed = True

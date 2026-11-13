@@ -79,12 +79,12 @@ class ConflictTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.calls, 1)
 
     async def test_schema_upgrade_preserves_data_and_future_version_is_rejected(self):
-        await self.store.call(lambda db: db.execute('DELETE FROM schema_version WHERE version=3'))
+        await self.store.call(lambda db: db.execute('DELETE FROM schema_version WHERE version>=3'))
         await self.store.initialize()
         version = await self.store.call(lambda db: db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0])
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
         self.assertEqual((await self.store.get_task(self.task['id']))['id'], self.task['id'])
-        await self.store.call(lambda db: db.execute('INSERT INTO schema_version VALUES (4)'))
+        await self.store.call(lambda db: db.execute('INSERT INTO schema_version VALUES (5)'))
         with self.assertRaisesRegex(RuntimeError, '拒绝降级'):
             await self.store.initialize()
 

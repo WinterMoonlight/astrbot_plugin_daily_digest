@@ -469,6 +469,7 @@ class Interactions:
         reminder={'id':uid(),'recipient':record['recipient'],'task_id':record['task_id'],
             'task_ids':[record['task_id']],'list_ids':[record['id']],'title':candidate['title'],
             'sources':candidate['sources'],'place':candidate.get('place',''),'event_at':event.isoformat(),
+            'condition':candidate.get('condition',''),
             'remind_at':remind.isoformat(),'lead_minutes':lead,'timezone':record['config']['timezone'],
             'state':'scheduled','version':1,'created_at':now.isoformat(),
             'immediate':bool(intent.get('immediate'))}

@@ -204,7 +204,8 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             models = FakeModels()
             result = await Generator(models, FakeHistory(text)).run(config(), utcnow(), {'call_budget': 64})
             self.assertGreaterEqual(len(models.calls), minimum)
-            self.assertIn('覆盖说明', result['summary'])
+            self.assertNotIn('覆盖说明', result['summary'])
+            self.assertTrue(result['coverage'])
             self.assertEqual(result['logical_calls'], len(models.calls))
 
     async def test_bad_model_format_and_budget_fail_closed(self):

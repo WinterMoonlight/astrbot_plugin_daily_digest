@@ -80,7 +80,8 @@ class GroupedGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item['group']['name'] for item in final['groups']], ['课程通知群', '社团群'])
         self.assertTrue(all('facts' in item and 'messages' not in item for item in final['groups']))
         self.assertEqual(result['logical_calls'], 3)
-        self.assertIn('课程通知群（101）', result['summary'])
+        self.assertEqual(result['summary'], '多群简报')
+        self.assertEqual(result['coverage'][0]['group_name'], '课程通知群')
 
     async def test_one_small_group_uses_one_independent_request(self):
         group = 'bot:GroupMessage:101'
@@ -130,7 +131,52 @@ class GroupedGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_name_uses_group_number_without_inventing_a_name(self):
         result, model = await self.run_digest([message('bot:GroupMessage:101', 'bot/1')])
         self.assertIsNone(model.calls[-1][0]['groups'][0]['group']['name'])
-        self.assertIn('群 101', result['summary'])
+        self.assertEqual(result['summary'], '多群简报')
+        self.assertEqual(result['groups'][0]['id'], '101')
+
+    async def test_final_style_keeps_persona_and_hides_internal_source_labels(self):
+        result, model = await self.run_digest([message('bot:GroupMessage:101', 'bot/1')])
+        _, prompt, system = model.calls[-1]
+        self.assertIn('表达必须遵循所选人格', system)
+        self.assertIn('任务选定的人格', system)
+        self.assertIn('不展示群号', system)
+        self.assertIn('不编造采纳数量', prompt)
+        self.assertNotIn('可选语气', system)
+        self.assertNotIn('覆盖说明', result['summary'])
+
+    async def test_candidate_condition_is_preserved_separately_from_activity_title(self):
+        title = '学院迎新活动到场签到'
+        condition = '这项安排面向名单内同学，请先核对是否参加。'
+        model = Models(final=lambda data: {'summary': title, 'candidates': [{
+            'title': title, 'event_at': (utcnow() + timedelta(hours=1)).isoformat(),
+            'condition': condition, 'sources': ['bot/1']}]})
+        result, _ = await self.run_digest([message('bot:GroupMessage:101', 'bot/1')], model=model)
+        self.assertEqual(result['candidates'][0]['title'], title)
+        self.assertEqual(result['candidates'][0]['condition'], condition)
+        self.assertEqual(result['candidates'][0]['source_groups'][0]['id'], '101')
+
+    async def test_invalid_candidate_condition_is_not_silently_dropped(self):
+        for invalid in (['名单内'], '长' * 301):
+            model = Models(final=lambda data: {'summary': '活动', 'candidates': [{
+                'title': '活动签到', 'event_at': (utcnow() + timedelta(hours=1)).isoformat(),
+                'condition': invalid, 'sources': ['bot/1']}]})
+            with self.assertRaisesRegex(ValueError, '适用条件'):
+                await self.run_digest([message('bot:GroupMessage:101', 'bot/1')], model=model)
+
+    async def test_partial_history_is_disclosed_to_final_model_without_count_claims(self):
+        class Partial(History):
+            async def read(self, groups, start, end):
+                rows, coverage = await super().read(groups, start, end)
+                coverage[1]['read'] = 'failed'
+                return rows, coverage
+        a, b = 'bot:GroupMessage:101', 'bot:GroupMessage:202'
+        model = Models()
+        result = await Generator(model, Partial([message(a, 'bot/1')], {b: '社团群'})).run(
+            config(groups=[a, b]), utcnow(), {'call_budget': 64})
+        self.assertIn('本次未能读取：社团群', model.calls[-1][1])
+        self.assertIn('最多一句', model.calls[-1][1])
+        self.assertEqual(result['coverage'][1]['read'], 'failed')
+        self.assertEqual(result['summary'], '多群简报')
 
     async def test_same_group_number_on_different_platforms_stays_distinct(self):
         rows = [message('one:GroupMessage:101', 'one/1'), message('two:GroupMessage:101', 'two/1')]

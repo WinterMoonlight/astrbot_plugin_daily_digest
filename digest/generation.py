@@ -64,15 +64,21 @@ class Generator:
                   '只返回 JSON，不调用工具。不编造日期、地点、来源。相对日期依来源消息时间解析。'
                   '同一群内关联通知、补充、改期与取消；不同群的同名事项不能仅凭名称当作同一事项。'
                   '任务时区：' + task.timezone + '。任务要求：' + task.prompt)
-        final_policy = policy + '\n可选语气（不得覆盖任务要求）：' + prepared['persona']
+        final_policy = (policy + '\n表达必须遵循所选人格，不仅在开头加称呼；人格不改变事实和行动权限。\n'
+                        + prepared['persona'] + '\n展示规则：使用自然、简短的 QQ 纯文本。'
+                        '群名融入事项叙述，同一来源不反复报出；不展示群号、UMO、来源编号或覆盖统计。'
+                        '旧任务提示词若要求逐条列群号或固定分类，以此展示规则为准。')
         specs = {
             'final': ('输出 {"summary":"简报正文，无重要内容时为空", "candidates":'
                       '[{"title":"事项", "event_at":"带时区ISO时间，无法确定则null",'
-                      '"sources":["来源id"], "place":"地点或空字符串"}], "changes":'
+                      '"sources":["来源id"], "place":"地点或空字符串", "condition":"适用条件或空字符串"}], "changes":'
                       '[{"title":"原事项名称","old_event_at":"原带时区ISO时间",'
                       '"event_at":"改期后带时区ISO时间或null","cancelled":false,"sources":["来源id"]}]}。'
                       '候选事项必须出现在正文中。仅在资料明确给出原事项时间及改期或取消时填写 changes；不猜测原时间。'
-                      '正文的重要事项标注来源群名和群号；群名为 null 时用群号。合并跨群重复通知时保留所有来源群。'),
+                      '优先写需要行动和临近的事项，每项通常一两句；同一事项及改期合并讲，不重复分栏。'
+                      '候选 title 用具体活动名加时间节点，如某活动到场签到；只用已知信息，短于正文，不重复完整通知。'
+                      '适用条件写入 condition，用自然短句保留，不把“若在名单中”等条件塞进标题。'
+                      '群名自然融入句子，缺少群名时说相关群消息，来源编号只放结构化 sources 中。'),
             'group': ('只处理当前 group，输出 {"facts":[{"text":"重要事实，保留时间、地点及通知之间的关系",'
                       '"sources":["本批提供的原始来源id"]}]}。没有重要内容时 facts 为空。'
                       '综合同群通知、补充、改期和取消，保留必要日期、条件及不确定性，不重复输出群名群号。'
@@ -82,6 +88,11 @@ class Generator:
                       '每个输入群恰好返回一次；保持分组，不把一个群的事实或来源移给另一个群。'
                       '保留关键时间、地点、条件、改期和取消信息，非空群不能被整组清空。')}
         compact = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+        unavailable = [metadata[c['group']]['name'] or '部分群' for c in coverage if c.get('read') == 'failed']
+        if unavailable:
+            specs['final'] += ('本次未能读取：' + '、'.join(unavailable) +
+                               '。若有简报，用所选人格最多一句说明内容可能不全，不声称完整覆盖。')
+        specs['final'] += '读取条数不等于采纳条数，不编造采纳数量；正常读取时无需说明统计。'
         size = lambda value: len(compact(value).encode('utf-8'))
         window = {'start': start.isoformat(), 'end': end.isoformat(), 'timezone': task.timezone}
         reserve = max(1024, prepared['window'] // 4)
@@ -258,6 +269,9 @@ class Generator:
         for item in final['candidates']:
             if not isinstance(item, dict) or not isinstance(item.get('title'), str):
                 raise ValueError('候选事项格式不正确')
+            condition = item.get('condition', '')
+            if not isinstance(condition, str) or len(condition) > 300:
+                raise ValueError('候选事项的适用条件应为简短文字')
             sources = item.get('sources', [])
             if not isinstance(sources, list) or any(not isinstance(x, str) or x not in known for x in sources):
                 raise ValueError('候选事项包含无效来源')
@@ -268,12 +282,6 @@ class Generator:
                 if not sources:
                     raise ValueError('候选事项缺少来源')
                 result['candidates'].append({'title': item['title'], 'event_at': when.isoformat(),
-                    'sources': sources, 'place': str(item.get('place', '')),
+                    'sources': sources, 'place': str(item.get('place', '')), 'condition': condition.strip(),
                     'source_groups':[metadata[group] for group in dict.fromkeys(source_groups[source] for source in sources)]})
-        if result['summary']:
-            def label(item):
-                info = metadata[item['group']]
-                return f"{info['name']}（{info['id']}）" if info['name'] else f"群 {info['id']}"
-            result['summary'] += '\n\n[覆盖说明] ' + '；'.join(
-                f"{label(c)}：{c['count']} 条，{c['note']}" for c in coverage)
         return result

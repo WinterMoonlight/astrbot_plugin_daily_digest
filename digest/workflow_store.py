@@ -46,7 +46,7 @@ def outgoing(db, owner, channel, recipient, body, limit=1500, task_id=None):
 class WorkflowStore:
     async def migrate_workflow(self):
         def migrate(db):
-            # Additive tables; v3 prevents older code from executing pending native-conflict states.
+            # v4 removes timed reply fields; older code must not read the new dialogue format.
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS entities (
                     kind TEXT NOT NULL,id TEXT NOT NULL,recipient TEXT NOT NULL,
@@ -66,12 +66,18 @@ class WorkflowStore:
                     result TEXT,created_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(recipient,message_id));
                 INSERT OR IGNORE INTO schema_version VALUES (2);
                 INSERT OR IGNORE INTO schema_version VALUES (3);
+                INSERT OR IGNORE INTO schema_version VALUES (4);
             ''')
             if 'created_at' not in {r[1] for r in db.execute('PRAGMA table_info(interactions)')}:
                 db.execute("ALTER TABLE interactions ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
             for column in ('sent_at','ack_at'):
                 if column not in {r[1] for r in db.execute('PRAGMA table_info(outbox)')}:
                     db.execute(f'ALTER TABLE outbox ADD COLUMN {column} TEXT')
+            for record in entities(db, 'dialogue'):
+                if 'window_minutes' in record or 'expires_at' in record:
+                    record.pop('window_minutes', None)
+                    record.pop('expires_at', None)
+                    put(db, 'dialogue', record)  # Keep remaining quota, history and closed states.
             # v0.3.1 retained quote receipts but did not mark deleted change proposals.
             # Only already-scrubbed, orphaned change rows qualify for this safe backfill.
             for row in db.execute("""SELECT DISTINCT owner,recipient FROM outbox o

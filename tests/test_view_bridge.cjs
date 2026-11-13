@@ -31,7 +31,7 @@ test('native bridge errors retain the host message', async () => {
   await assert.rejects(api('save'), /配置版本冲突/);
 });
 
-test('reply window settings load and save through the management form', async () => {
+test('reply quota loads and saves without the removed time setting', async () => {
   const html = readFileSync(join(__dirname, '../views/digest/index.html'), 'utf8');
   const nodes = {};
   for (const match of html.matchAll(/<input\b[^>]*id="([^"]+)"[^>]*>/g)) {
@@ -41,7 +41,7 @@ test('reply window settings load and save through the management form', async ()
   for (const id of ['settings-open','settings-close','settings-dismiss','settings-form']) nodes[id] = {};
   nodes['settings-dialog'] = {close(){this.closed=true;},showModal(){this.closed=false;}};
   const settings = {concurrency:1, retention_days:30, text_limit:1500, send_interval:1,
-    generation_timeout:1200, call_budget:64, reply_window_minutes:8, reply_message_limit:6};
+    generation_timeout:1200, call_budget:64, reply_message_limit:6};
   const $ = id => {
     assert.ok(nodes[id], `missing form field ${id}`);
     return nodes[id];
@@ -57,18 +57,17 @@ test('reply window settings load and save through the management form', async ()
     $, api, renderTasks(){}, message(){}, guard: async fn => fn(),
   });
   await reload();
-  assert.equal(nodes['reply-window'].value, 8);
+  assert.equal(nodes['reply-window'], undefined);
   assert.equal(nodes['reply-limit'].value, 6);
-  nodes['reply-window'].value = '5';
   nodes['reply-limit'].value = '3';
   await nodes['settings-form'].onsubmit({preventDefault(){}});
   assert.equal(requests[0].action, 'settings');
-  assert.equal(requests[0].payload.values.reply_window_minutes, 5);
+  assert.equal(Object.hasOwn(requests[0].payload.values, 'reply_window_minutes'), false);
   assert.equal(requests[0].payload.values.reply_message_limit, 3);
   assert.equal(nodes['settings-dialog'].closed, true);
-  nodes['reply-window'].value = '99';
+  nodes['reply-limit'].value = '99';
   nodes['settings-open'].onclick();
-  assert.equal(nodes['reply-window'].value, 5, 'opening discards unsaved field edits');
+  assert.equal(nodes['reply-limit'].value, 3, 'opening discards unsaved field edits');
 });
 
 test('native conflict choices submit the selected job without a generic confirmation', async () => {

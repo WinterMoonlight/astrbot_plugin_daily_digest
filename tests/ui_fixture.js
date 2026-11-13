@@ -1,5 +1,5 @@
 (() => {
-  let tasks=[],settings={concurrency:1,retention_days:30,text_limit:1500,send_interval:1,generation_timeout:1200,call_budget:64,reply_window_minutes:5,reply_message_limit:3},runs={};
+  let tasks=[],settings={concurrency:1,retention_days:30,text_limit:1500,send_interval:1,generation_timeout:1200,call_budget:64,reply_message_limit:3},runs={};
   let parts=[{id:'part1',owner:'formal1',channel:'digest',ordinal:0,body:'第一段已发送',state:'acknowledged',receipt:'001'},
     {id:'part2',owner:'formal1',channel:'digest',ordinal:1,body:'第二段结果未知',state:'unknown'}];
   let reminder={id:'reminder123',task_id:'task1',task_ids:['task1'],list_ids:['formal1'],title:'课程说明会',recipient:'test:FriendMessage:456',event_at:'2026-12-01T15:00:00+08:00',remind_at:'2026-12-01T14:30:00+08:00',version:1,state:'scheduled'};

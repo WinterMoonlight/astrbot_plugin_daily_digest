@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .domain import TaskConfig, parse_time, utcnow
 from .workflow_store import WorkflowStore
-from .dialogue import DEFAULT_WINDOW_MINUTES, DEFAULT_MESSAGE_LIMIT
+from .dialogue import DEFAULT_MESSAGE_LIMIT
 
 
 class Conflict(ValueError):
@@ -46,7 +46,7 @@ class Store(WorkflowStore):
         def setup(db):
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone():
                 version=db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-                if version not in (1,2,3):
+                if version not in (1,2,3,4):
                     raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
@@ -68,13 +68,13 @@ class Store(WorkflowStore):
                 CREATE INDEX IF NOT EXISTS run_status ON runs(status,created_at);
             ''')
             version = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-            if version not in (1, 2, 3):
+            if version not in (1, 2, 3, 4):
                 raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (encode({
                 'concurrency': 1, 'retention_days': 30, 'text_limit': 1500,
                 'send_interval': 1, 'generation_timeout': 1200, 'call_budget': 64}),))
             settings = json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
-            settings.setdefault('reply_window_minutes', DEFAULT_WINDOW_MINUTES)
+            settings.pop('reply_window_minutes', None)
             settings.setdefault('reply_message_limit', DEFAULT_MESSAGE_LIMIT)
             db.execute('UPDATE settings SET data=? WHERE id=1', (encode(settings),))
             # Generated previews are retryable, sent messages are not.

@@ -101,7 +101,7 @@ form.elements.groups.oninput=renderGroups;
 form.onsubmit=e=>{e.preventDefault();guard(save,e.submitter);};
 $('new').onclick=()=>fill(null);
 $('refresh').onclick=()=>initialized?guard(reload,$('refresh')):initializeView();
-const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget','reply-window':'reply_window_minutes','reply-limit':'reply_message_limit'};
+const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget','reply-limit':'reply_message_limit'};
 $('settings-open').onclick=()=>{if(!initialized){message('请等待页面加载完成后再打开全局设置。',true);return;}for(const [id,key] of Object.entries(settingFields))$(id).value=savedSettings[key];$('settings-dialog').showModal();};
 for(const id of ['settings-close','settings-dismiss'])$(id).onclick=()=>$('settings-dialog').close();
 $('settings-form').onsubmit=event=>{event.preventDefault();return guard(async()=>{const values={};for(const [id,key] of Object.entries(settingFields))values[key]=Number($(id).value);await api('settings',{values});savedSettings={...savedSettings,...values};$('settings-dialog').close();message('全局设置已保存。');},$('settings-save'));};
@@ -174,7 +174,7 @@ function nativeConflictCard(card,change){
 async function related(){
   const container=$('related-list');container.replaceChildren();if(!selected){container.textContent='请先选择任务。';return;}
   const data=await api('related',{id:selected.id});
-  for(const list of data.list){const card=document.createElement('div');card.className='card';card.append(textNode('h3',`候选清单 ${list.id.slice(0,8)} · ${stateName(list.state)}`),textNode('p',`有效至：${list.expires_at||'尚未成功询问'}`));for(const [i,item] of list.items.entries())card.append(textNode('p',`${i+1}. ${item.title} · ${item.event_at}`));container.append(card);}
+  for(const list of data.list){const card=document.createElement('div');card.className='card';card.append(textNode('h3',`候选清单 ${list.id.slice(0,8)} · ${stateName(list.state)}`),textNode('p',`有效至：${list.expires_at||'尚未成功询问'}`));for(const [i,item] of list.items.entries()){card.append(textNode('p',`${i+1}. ${item.title} · ${item.event_at}`));if(item.condition)card.append(textNode('p',item.condition));}container.append(card);}
   for(const reminder of data.reminder){
     const card=document.createElement('div');card.className='card';
     card.append(textNode('h3',`${reminder.title} · ${stateName(reminder.state)}`),textNode('p',`提醒 ${reminder.id.slice(0,8)} · ${reminder.recipient} · 关联 ${reminder.task_ids.length} 个任务`));

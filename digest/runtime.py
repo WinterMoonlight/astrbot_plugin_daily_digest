@@ -82,10 +82,17 @@ class Runtime:
             record={'id':run['id'],'run_id':run['id'],'task_id':run['task_id'],'recipient':recipient,
                     'state':'awaiting_delivery','expires_at':None,'config':config,'items':items}
             put(db,'list',record)
-            text=f"【日程清单 {record['id'][:8]} · {config['name']}】\n"+'\n'.join(
+            text=f"【日程清单 · {config['name']}】\n"+'\n'.join(
                 f"{i}. {x['title']} · {display_time(x['event_at'],config['timezone'])}" for i,x in enumerate(items,1))
-            text+=f"\n要把哪些事项加入提醒？可回复“清单 {record['id'][:8]} 加入第1项”，也可以用自然语言指定事项和提醒时间。默认提前 {config['lead_minutes']} 分钟，清单发送成功后 {config['selection_hours']} 小时内可补选。"
-            text+=f"\n询问送达后 {settings['reply_window_minutes']} 分钟内的前 {settings['reply_message_limit']} 条文字消息可直接回复；之后请引用清单或使用 /日程。"
+            conditions = {}
+            for i, item in enumerate(items, 1):
+                if item.get('condition'):
+                    conditions.setdefault(item['condition'], []).append(str(i))
+            for condition, indices in conditions.items():
+                label = '提醒一下' if len(indices) == len(items) else '第' + '、'.join(indices) + '项'
+                text += f"\n{label}：{condition}"
+            text+=f"\n有想让我提醒你的事项吗？可以回复“第1项，提前半小时”。默认提前 {config['lead_minutes']} 分钟，清单 {config['selection_hours']} 小时内可补选。"
+            text+=f"\n本轮前 {settings['reply_message_limit']} 条有效文字消息可直接回复，之后请引用这条清单或使用 /日程。"
             outgoing(db,run['id'],'inquiry',recipient,text,settings['text_limit'],run['task_id'])
             dialogue.queue(db, run['id'], 'inquiry', recipient, {'list': [record]}, settings)
         for change in run['result'].get('changes',[]):
