@@ -3,7 +3,7 @@ const form = $('form');
 const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
 let selected = null, selectedRun = null, tasks = [], metadata = {models:[],personas:[],groups:[]}, page = 1, pollToken = 0;
 let bridge, initialized = false, deletionPreview = null, deleting = false;
-const stateNames={native_paused:'原生任务已停用',native_absent:'原生任务已结束或删除（送达未确认）',pending:'待处理',scheduled:'等待提醒',retry_wait:'等待重试',sending:'发送中',acknowledged:'已确认发送',failed:'失败',unknown:'结果未知',held:'已停止',active:'可选择',awaiting_delivery:'等待询问成功',awaiting_choice:'等待指定时间',expired:'已过期',superseded:'已被新清单替换',cancelled:'已取消',missed:'已错过',confirmed:'已确认',rejected:'已拒绝'};
+const stateNames={awaiting_native_choice:'等待重复任务确认',native_reused_changed:'复用任务已变化',native_paused:'原生任务已停用',native_absent:'原生任务已结束或删除（送达未确认）',pending:'待处理',scheduled:'等待提醒',retry_wait:'等待重试',sending:'发送中',acknowledged:'已确认发送',failed:'失败',unknown:'结果未知',held:'已停止',active:'可选择',awaiting_delivery:'等待询问成功',awaiting_choice:'等待指定时间',expired:'已过期',superseded:'已被新清单替换',cancelled:'已取消',missed:'已错过',confirmed:'已确认',rejected:'已拒绝'};
 const stateName=state=>stateNames[state]||state;
 function message(text, error=false){$('message').textContent=text;$('message').className=error?'error':'';}
 async function api(action, values={}){
@@ -16,7 +16,7 @@ async function guard(fn, button){
   finally{if(button){button.disabled=false;if(['archive','toggle'].includes(button.id))button.disabled=!selected||!!selected.archived;if(['save','generate'].includes(button.id))button.disabled=!!selected?.archived;if(button.id==='delete-task')button.disabled=!selected?.archived;}}
 }
 function option(select,value,label){const node=document.createElement('option');node.value=value;node.textContent=label;select.append(node);}
-function options(select,values,current){select.replaceChildren();option(select,'','请选择');for(const v of values)option(select,v.id,v.label||v.id);if(current&&!values.some(v=>v.id===current))option(select,current,`${current}（当前不可用）`);select.value=current||'';}
+function options(select,values,current,emptyLabel='请选择'){select.replaceChildren();option(select,'',emptyLabel);for(const v of values)option(select,v.id,v.label||v.id);if(current&&!values.some(v=>v.id===current))option(select,current,`${current}（当前不可用）`);select.value=current||'';}
 function readConfig(){
   const data={};
   for(const key of Object.keys(defaults)){
@@ -36,7 +36,7 @@ function fill(task){
     else form.elements[key].value=data[key];
   }
   options(form.elements.provider_id,metadata.models.map(m=>({id:m.id,label:`${m.id} · ${m.model}`})),data.provider_id);
-  options(form.elements.persona_id,metadata.personas,data.persona_id);
+  options(form.elements.persona_id,metadata.personas,data.persona_id,'沿用 AstrBot 会话人格');
   taskState();$('delivery-panel').hidden=true;
   $('weekdays').hidden=data.frequency!=='weekly';
   $('preview-state').textContent='';$('preview-text').textContent='尚无预览。';$('preview-meta').textContent='';
@@ -83,7 +83,7 @@ $('group-picker').onchange=()=>{const value=$('group-picker').value;if(value){co
 form.onsubmit=e=>{e.preventDefault();guard(save,e.submitter);};
 $('new').onclick=()=>fill(null);
 $('refresh').onclick=()=>initialized?guard(reload,$('refresh')):initializeView();
-const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget'};
+const settingFields={concurrency:'concurrency',retention:'retention_days','text-limit':'text_limit','send-interval':'send_interval','generation-timeout':'generation_timeout','call-budget':'call_budget','reply-window':'reply_window_minutes','reply-limit':'reply_message_limit'};
 $('settings-save').onclick=()=>guard(async()=>{const values={};for(const [id,key] of Object.entries(settingFields))values[key]=Number($(id).value);await api('settings',{values});message('全局设置已保存。');},$('settings-save'));
 $('archive').onclick=()=>guard(async()=>{if(!selected)return;await api('archive',{id:selected.id,version:selected.version});fill(null);await reload();message('任务已归档，执行记录保留。');},$('archive'));
 function deleteReady(){ $('delete-confirm').disabled=deleting||!deletionPreview||deletionPreview.busy||!deletionPreview.archived||$('delete-confirmation').value!=='彻底删除'; }
@@ -95,8 +95,9 @@ $('delete-task').onclick=()=>guard(async()=>{
   $('delete-counts').textContent=`将清除 ${p.runs} 条执行记录、${p.lists} 份候选清单；关联 ${p.unique_reminders} 条独有提醒、${p.shared_reminders} 条共享提醒。`;
   $('delete-legacy').textContent=p.legacy_reply_texts?`同时清空该收件人 ${p.legacy_reply_texts} 条无法归属任务的旧操作反馈文本，保留防重 ID。其他任务的配置、简报和提醒不受影响。`:'';
   $('delete-reminders').checked=p.cancel_unique;
-  $('delete-reminders').disabled=p.resuming||!p.unique_reminders;
+  $('delete-reminders').disabled=p.resuming||!(p.cancellable_unique_reminders??p.unique_reminders);
   $('delete-shared').textContent=p.resuming?'此前删除尚未完成，将沿用原提醒处理方式继续；已取消的提醒不会重建。':`共享提醒始终保留，仅解除与本任务的关联。保留的独有提醒也会解除关联，继续独立存在。`;
+  if(p.reused_reminders)$('delete-shared').textContent+=` 其中 ${p.reused_reminders} 条复用的原生任务始终保留，不会被插件取消。`;
   $('delete-confirmation').value='';
   $('delete-error').textContent=p.busy?'仍有生成、发送或私聊操作正在进行，请稍后重新打开确认页。':'';
   deleteReady();$('delete-dialog').showModal();
@@ -133,12 +134,44 @@ $('delivery-refresh').onclick=()=>guard(delivery,$('delivery-refresh'));
 $('catchup-preview').onclick=()=>guard(async()=>{if(!selectedRun)return;const id=selectedRun.id;await api('catchup_preview',{id});const token=++pollToken;message('正在准备补发预览，尚未提交发送。');while(token===pollToken){const run=await api('run',{id});showRun(run);if(!['queued','generating','ready'].includes(run.status)){await delivery();break;}await new Promise(r=>setTimeout(r,1000));}},$('catchup-preview'));
 for(const [id,channel] of [['resend-digest','digest'],['resend-inquiry','inquiry']])$(id).onclick=()=>guard(async()=>{if(!selectedRun)return;await api('resend',{id:selectedRun.id,channel});message('已提交未成功部分，请刷新查看回执。');await delivery();},$(id));
 function field(card,label,value=''){const node=document.createElement('label'),input=document.createElement('input');node.append(document.createTextNode(label),input);input.value=value;card.append(node);return input;}
+function nativeConflictCard(card,change){
+  const resolve=async(accept,values={})=>{const result=await api('change',{id:change.id,accept,values});message(result.message);await related();};
+  for(const [index,item] of change.proposal.candidates.entries()){
+    card.append(textNode('p',`${index+1}. ${item.name} · ${item.at} · ${item.enabled?'启用':'停用'} · ${item.run_once?'一次性':'周期任务'}`));
+    if(change.state==='pending')card.append(actionButton(`复用第 ${index+1} 个任务`,()=>resolve(true,{native_choice:'reuse',native_job_id:item.id})));
+  }
+  card.append(textNode('p','复用会保留原任务的时间、内容和启停状态，后续请在 AstrBot「未来任务」管理。'));
+  if(change.state==='pending')card.append(actionButton('仍然新建',()=>resolve(true,{native_choice:'create'})),actionButton('放弃本次新增',()=>resolve(false)));
+}
 async function related(){
   const container=$('related-list');container.replaceChildren();if(!selected){container.textContent='请先选择任务。';return;}
   const data=await api('related',{id:selected.id});
   for(const list of data.list){const card=document.createElement('div');card.className='card';card.append(textNode('h3',`候选清单 ${list.id.slice(0,8)} · ${stateName(list.state)}`),textNode('p',`有效至：${list.expires_at||'尚未成功询问'}`));for(const [i,item] of list.items.entries())card.append(textNode('p',`${i+1}. ${item.title} · ${item.event_at}`));container.append(card);}
-  for(const reminder of data.reminder){const card=document.createElement('div');card.className='card';card.append(textNode('h3',`${reminder.title} · ${stateName(reminder.state)}`),textNode('p',`提醒 ${reminder.id.slice(0,8)} · ${reminder.recipient} · 关联 ${reminder.task_ids.length} 个任务`));if(reminder.native_owned){card.append(textNode('p',`原生未来任务：${reminder.native_name||reminder.title} · ID ${reminder.native_job_id||'尚未确认创建'}`),textNode('p',`原生计划：${reminder.native_schedule||reminder.remind_at} · ${reminder.native_enabled===false?'停用':'由原生执行'}`));if(reminder.native_error)card.append(textNode('p',reminder.native_error));}const eventAt=field(card,'事项时间（带时区）',reminder.event_at),remindAt=field(card,'提醒时间（带时区）',reminder.remind_at);if(!['cancelled','native_absent'].includes(reminder.state)){card.append(actionButton('保存本次修改',async()=>{const values={};if(eventAt.value!==reminder.event_at)values.event_at=eventAt.value;if(remindAt.value!==reminder.remind_at)values.remind_at=remindAt.value;if(!Object.keys(values).length){message('时间未变化。');return;}const result=await api('reminder',{id:reminder.id,version:reminder.version,operation:'modify',values});message(result.message);await related();}),actionButton('取消该提醒',async()=>{const result=await api('reminder',{id:reminder.id,version:reminder.version,operation:'cancel'});message(result.message);await related();}));}container.append(card);}
-  for(const change of data.change){const card=document.createElement('div');card.className='card';const proposal=change.proposal;const target=data.reminder.find(x=>x.id===proposal.reminder_id)?.title||data.list.find(x=>x.id===proposal.list_id)?.items[proposal.index-1]?.title||'关联事项';const operation={select:'添加所选日程',modify:'调整事项或提醒时间',cancel:'取消已有提醒'}[proposal.action]||'调整关联事项';card.append(textNode('h3',`确认 ${change.id.slice(0,8)} · ${stateName(change.state)}`),textNode('p',`${target}：${change.reason}`),textNode('p',operation+(proposal.event_at?'，事项时间 '+proposal.event_at:'')));if(change.state==='pending'){const when=field(card,'本次指定提醒时间（可选，带时区）');for(const accept of [true,false])card.append(actionButton(accept?'确认此项操作':'拒绝并保留原提醒',async()=>{const result=await api('change',{id:change.id,accept,values:when.value?{remind_at:when.value}:{}});message(result.message);await related();}));}container.append(card);}
+  for(const reminder of data.reminder){
+    const card=document.createElement('div');card.className='card';
+    card.append(textNode('h3',`${reminder.title} · ${stateName(reminder.state)}`),textNode('p',`提醒 ${reminder.id.slice(0,8)} · ${reminder.recipient} · 关联 ${reminder.task_ids.length} 个任务`));
+    if(reminder.native_owned){
+      card.append(textNode('p',`原生未来任务：${reminder.native_name||reminder.title} · ID ${reminder.native_job_id||'尚未确认创建'}`),textNode('p',`原生计划：${reminder.native_schedule||reminder.remind_at} · ${reminder.native_enabled===false?'停用':'由原生执行'}`));
+      if(reminder.native_error)card.append(textNode('p',reminder.native_error));
+    }
+    const eventAt=field(card,'事项时间（带时区）',reminder.event_at),remindAt=field(card,'提醒时间（带时区）',reminder.remind_at);
+    if(reminder.native_link_mode==='reused'){
+      eventAt.disabled=true;remindAt.disabled=true;
+      card.append(textNode('p','已复用原有原生任务。修改或取消请前往 AstrBot「未来任务」；删除本插件任务不会删除该原生任务。'));
+    }else if(!['cancelled','native_absent'].includes(reminder.state)){
+      card.append(actionButton('保存本次修改',async()=>{const values={};if(eventAt.value!==reminder.event_at)values.event_at=eventAt.value;if(remindAt.value!==reminder.remind_at)values.remind_at=remindAt.value;if(!Object.keys(values).length){message('时间未变化。');return;}const result=await api('reminder',{id:reminder.id,version:reminder.version,operation:'modify',values});message(result.message);await related();}),actionButton('取消该提醒',async()=>{const result=await api('reminder',{id:reminder.id,version:reminder.version,operation:'cancel'});message(result.message);await related();}));
+    }
+    container.append(card);
+  }
+  for(const change of data.change){
+    const card=document.createElement('div');card.className='card';const proposal=change.proposal;
+    const target=data.reminder.find(x=>x.id===proposal.reminder_id)?.title||data.list.find(x=>x.id===proposal.list_id)?.items[proposal.index-1]?.title||'关联事项';
+    const operation={select:'添加所选日程',modify:'调整事项或提醒时间',cancel:'取消已有提醒',native_conflict:'核对已有原生任务'}[proposal.action]||'调整关联事项';
+    card.append(textNode('h3',`确认 ${change.id.slice(0,8)} · ${stateName(change.state)}`),textNode('p',`${target}：${change.reason}`),textNode('p',operation+(proposal.event_at?'，事项时间 '+proposal.event_at:'')));
+    if(proposal.action==='native_conflict')nativeConflictCard(card,change);
+    else if(change.state==='pending'){const when=field(card,'本次指定提醒时间（可选，带时区）');for(const accept of [true,false])card.append(actionButton(accept?'确认此项操作':'拒绝并保留原提醒',async()=>{const result=await api('change',{id:change.id,accept,values:when.value?{remind_at:when.value}:{}});message(result.message);await related();}));}
+    container.append(card);
+  }
   for(const part of data.outbox.filter(x=>['failed','unknown'].includes(x.state)))container.append(receiptCard(part,related));
   if(!container.childNodes.length)container.textContent='暂无关联清单或提醒。';
 }

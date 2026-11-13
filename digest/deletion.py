@@ -4,6 +4,7 @@ import json
 
 from .domain import utcnow
 from .workflow_store import dump, entities, put
+from .dialogue import discard_task
 
 
 class TaskDeletion:
@@ -71,6 +72,8 @@ class TaskDeletion:
                 'runs': len(info['runs']), 'lists': len(info['lists']),
                 'unique_reminders': len(info['unique']),
                 'shared_reminders': len(info['reminders']) - len(info['unique']),
+                'reused_reminders': sum(r.get('native_link_mode')=='reused' for r in info['reminders']),
+                'cancellable_unique_reminders': sum(r.get('native_link_mode')!='reused' for r in info['unique']),
                 'legacy_reply_texts': info['legacy_reply_texts'],
                 'resuming': info['journal'] is not None,
                 'cancel_unique': bool(info['journal'] and info['journal']['cancel_unique'])}
@@ -114,6 +117,8 @@ class TaskDeletion:
                 try:
                     jobs = {j.job_id: j for j in await self.native.manager.list_jobs()}
                     for reminder in info['unique']:
+                        if reminder.get('native_link_mode') == 'reused':
+                            continue  # Removing a link never grants ownership of a pre-existing job.
                         linked = [j for j in jobs.values() if j.job_id == reminder.get('native_job_id') or
                                   ((j.payload or {}).get('digest_reminder_owner') == self.native.OWNER and
                                    (j.payload or {}).get('digest_reminder_id') == reminder['id'])]
@@ -128,7 +133,8 @@ class TaskDeletion:
                     raise ValueError('部分原生提醒尚未确认取消，任务数据仍保留。请检查未来任务后，'
                                      '重新打开删除确认页继续；已取消的提醒不会重建。') from exc
             await self.store.call(lambda db: self.purge(db, task_id, cancel_unique))
-            return {'deleted': True, 'cancelled_unique': len(info['unique']) if cancel_unique else 0,
+            return {'deleted': True, 'cancelled_unique': sum(r.get('native_link_mode')!='reused' for r in info['unique']) if cancel_unique else 0,
+                    'preserved_reused_jobs': sum(r.get('native_link_mode')=='reused' for r in info['reminders']),
                     'retained_reminders': len(info['reminders']) - (len(info['unique']) if cancel_unique else 0)}
 
     def purge(self, db, task_id, cancel_unique):
@@ -136,6 +142,7 @@ class TaskDeletion:
         if info['busy']:
             raise ValueError('仍有发送中的消息，已保留数据，请稍后继续删除')
         task = info['task']; run_ids = {x['id'] for x in info['runs']}
+        discard_task(db, task_id)
         list_ids = {x['id'] for x in info['lists']}
         unique_ids = {x['id'] for x in info['unique']}
         if cancel_unique:
@@ -160,6 +167,12 @@ class TaskDeletion:
                 r['interaction_config'] = {k: task['config'][k] for k in
                                           ('provider_id', 'persona_id', 'recipient', 'timezone')}
                 r['interaction_config'].update(recipient=r['recipient'], timezone=r['timezone'])
+                if r.get('native_conflict_id') and not r.get('native_job_id') and not r.get('native_creating'):
+                    # A deleted task must not later create an unconfirmed reminder in the background.
+                    r['state'] = 'cancelled'
+                    r['version'] += 1
+                    r.pop('native_conflict_id', None)
+                    r.pop('native_resolution', None)
             r.pop('delete_pending_task', None)
             put(db, 'reminder', r)
             db.execute("UPDATE entities SET task_id=? WHERE kind='reminder' AND id=?", (r['task_id'], r['id']))

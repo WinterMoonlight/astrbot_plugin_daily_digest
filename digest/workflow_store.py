@@ -46,7 +46,7 @@ def outgoing(db, owner, channel, recipient, body, limit=1500, task_id=None):
 class WorkflowStore:
     async def migrate_workflow(self):
         def migrate(db):
-            # Additive v1 -> v2: existing previews/tasks remain readable.
+            # Additive tables; v3 prevents older code from executing pending native-conflict states.
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS entities (
                     kind TEXT NOT NULL,id TEXT NOT NULL,recipient TEXT NOT NULL,
@@ -65,6 +65,7 @@ class WorkflowStore:
                     recipient TEXT NOT NULL,message_id TEXT NOT NULL,state TEXT NOT NULL,
                     result TEXT,created_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(recipient,message_id));
                 INSERT OR IGNORE INTO schema_version VALUES (2);
+                INSERT OR IGNORE INTO schema_version VALUES (3);
             ''')
             if 'created_at' not in {r[1] for r in db.execute('PRAGMA table_info(interactions)')}:
                 db.execute("ALTER TABLE interactions ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")

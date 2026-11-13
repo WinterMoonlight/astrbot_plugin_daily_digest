@@ -12,6 +12,30 @@ class NativeModels:
     def __init__(self, context):
         self.context = context
 
+    async def resolve_persona(self, task):
+        """Use the chosen AstrBot persona, otherwise resolve the recipient's actual session persona."""
+        manager = getattr(self.context, 'persona_manager', None)
+        if manager is None:
+            return '', ['宿主人格接口不可用，本次使用任务提示词']
+        try:
+            if task.persona_id:
+                item = await manager.get_persona(task.persona_id)
+                return item.system_prompt or '', []
+            conversation_persona_id = None
+            conversations = getattr(self.context, 'conversation_manager', None)
+            if conversations is not None:
+                cid = await conversations.get_curr_conversation_id(task.recipient)
+                if cid:
+                    conversation = await conversations.get_conversation(task.recipient, cid)
+                    if conversation is not None:
+                        conversation_persona_id = conversation.persona_id
+            _, persona, _, _ = await manager.resolve_selected_persona(
+                umo=task.recipient, conversation_persona_id=conversation_persona_id,
+                platform_name='aiocqhttp')
+            return (persona.get('prompt') or persona.get('system_prompt') or '') if persona else '', []
+        except Exception:
+            return '', ['人格读取失败，本次使用任务提示词']
+
     async def providers(self, task):
         from astrbot.core.provider.provider import Provider
         main = await self.context.provider_manager.get_provider_by_id(task.provider_id)
@@ -41,13 +65,7 @@ class NativeModels:
             if not isinstance(window, int) or window < 1024:
                 raise ValueError('主模型或回退模型缺少有效上下文上限，请在 AstrBot 模型设置中填写')
             windows.append(window)
-        persona, warnings = '', []
-        if task.persona_id:
-            try:
-                item = await self.context.persona_manager.get_persona(task.persona_id)
-                persona = item.system_prompt or ''
-            except Exception:
-                warnings.append('所选人格不可用，本次仅使用任务提示词')
+        persona, warnings = await self.resolve_persona(task)
         return {'providers': providers, 'retries': retries, 'window': min(windows),
                 'persona': persona, 'warnings': warnings}
 
@@ -84,10 +102,35 @@ class NativeHistory:
     def __init__(self, context):
         self.context = context
 
+    async def group_labels(self, groups):
+        labels = {}
+        for group in groups:
+            platform, _, number = split_umo(group, 'GroupMessage')
+            labels[group] = {'group_id': number, 'group_name': None, 'platform_id': platform}
+        platforms = getattr(getattr(self.context, 'platform_manager', None), 'platform_insts', [])
+        for platform_id in {item['platform_id'] for item in labels.values()}:
+            try:
+                platform = next(p for p in platforms if p.meta().id == platform_id and p.meta().name == 'aiocqhttp')
+                async with asyncio.timeout(10):
+                    items = await platform.bot.call_action('get_group_list')
+                names = {str(item['group_id']): item.get('group_name') for item in items}
+            except Exception:
+                names = {}
+            for info in labels.values():
+                if info['platform_id'] != platform_id:
+                    continue
+                name = names.get(info['group_id'])
+                if isinstance(name, str) and name.strip():
+                    info['group_name'] = name
+                else:
+                    info['metadata_warning'] = '群名称暂不可用，使用群号标识'
+        return labels
+
     async def read(self, groups, start, end):
         from sqlalchemy import select, func, text
         from astrbot.core.db.po import PlatformMessageHistory as Row
         messages, coverage = [], []
+        labels = await self.group_labels(groups)
         for group in groups:
             platform, _, _ = split_umo(group, 'GroupMessage')
             try:
@@ -102,6 +145,7 @@ class NativeHistory:
                         Row.created_at < end.astimezone(timezone.utc).replace(tzinfo=None))
                         .order_by(Row.created_at, Row.id))
                     rows = result.scalars().all()
+                    group_messages = []
                     for row in rows:
                         parts = row.content.get('message', [])
                         body = []
@@ -114,20 +158,20 @@ class NativeHistory:
                                 body.append('@' + str(part.get('name') or part.get('user_id', '')))
                             else:
                                 body.append('[' + str(part.get('type', '媒体')) + ']')
-                        messages.append({'id': f'{platform}/{row.id}', 'group': group,
+                        group_messages.append({'id': f'{platform}/{row.id}', 'group': group,
                             'time': row.created_at.replace(tzinfo=timezone.utc).isoformat(),
                             'text': ''.join(body)})
-                    coverage.append({'group': group, 'read': 'ok', 'count': len(rows),
+                    messages.extend(group_messages)
+                    coverage.append({'group': group, **labels[group], 'read': 'ok', 'count': len(rows),
                         'retained_count': stats[0], 'earliest': str(stats[1]) if stats[1] else None,
                         'latest': str(stats[2]) if stats[2] else None,
                         'completeness': 'unknown',
                         'note': '仅基于现存历史；时间为入库时间，无法证明采集完整'})
             except Exception:
-                coverage.append({'group': group, 'read': 'failed', 'count': 0,
+                coverage.append({'group': group, **labels[group], 'read': 'failed', 'count': 0,
                                  'completeness': 'insufficient', 'note': '该群历史读取失败'})
         if not any(item['read'] == 'ok' for item in coverage):
             raise RuntimeError('所有群历史读取失败')
-        messages.sort(key=lambda x: (x['time'], x['id']))
         return messages, coverage
 
 

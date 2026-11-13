@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from .adapters import SendResult
 from .domain import TaskConfig, parse_time, utcnow
 from .workflow_store import dump, entities, entity, outgoing, put, uid
+from . import dialogue
 
 
 def display_time(value, zone='Asia/Shanghai'):
@@ -84,7 +85,9 @@ class Runtime:
             text=f"【日程清单 {record['id'][:8]} · {config['name']}】\n"+'\n'.join(
                 f"{i}. {x['title']} · {display_time(x['event_at'],config['timezone'])}" for i,x in enumerate(items,1))
             text+=f"\n要把哪些事项加入提醒？可回复“清单 {record['id'][:8]} 加入第1项”，也可以用自然语言指定事项和提醒时间。默认提前 {config['lead_minutes']} 分钟，清单发送成功后 {config['selection_hours']} 小时内可补选。"
+            text+=f"\n询问送达后 {settings['reply_window_minutes']} 分钟内的前 {settings['reply_message_limit']} 条文字消息可直接回复；之后请引用清单或使用 /日程。"
             outgoing(db,run['id'],'inquiry',recipient,text,settings['text_limit'],run['task_id'])
+            dialogue.queue(db, run['id'], 'inquiry', recipient, {'list': [record]}, settings)
         for change in run['result'].get('changes',[]):
             matches=[r for r in entities(db,'reminder',recipient) if r['state'] not in ('cancelled','missed')
                      and r['title']==change['title'] and r['event_at']==change['old_event_at']]
@@ -112,6 +115,8 @@ class Runtime:
             f"【提醒确认 {change['id'][:8]}】{change['reason']}：{reminder['title']}。建议{detail}。"
             f"请回复“确认 {change['id'][:8]}”或说明希望的提醒时间；未回复会保留原提醒。",settings['text_limit'],
             change['task_id'] if change.get('origin_run') else None)
+        dialogue.queue(db, change['id'], 'change', change['recipient'],
+                       {'change': [change], 'reminder': [reminder]}, settings)
 
     async def reconcile(self, now=None, restart=False, due=True):
         now=now or utcnow()
@@ -175,6 +180,7 @@ class Runtime:
                     outgoing(db,owner,'reminder',reminder['recipient'],
                         f"【日程提醒】{reminder['title']}\n事项时间：{display_time(reminder['event_at'],reminder['timezone'])}\n{reminder.get('place','')}",settings['text_limit'])
                 put(db,'reminder',reminder)
+            dialogue.reconcile(db, now)
         await self.store.call(work)
 
     async def claim(self, now=None):

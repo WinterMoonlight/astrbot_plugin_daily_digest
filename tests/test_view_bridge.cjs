@@ -30,3 +30,57 @@ test('native bridge errors retain the host message', async () => {
   }}});
   await assert.rejects(api('save'), /配置版本冲突/);
 });
+
+test('reply window settings load and save through the management form', async () => {
+  const html = readFileSync(join(__dirname, '../views/digest/index.html'), 'utf8');
+  const nodes = {};
+  for (const match of html.matchAll(/<input\b[^>]*id="([^"]+)"[^>]*>/g)) {
+    nodes[match[1]] = {value: match[0].match(/value="([^"]*)"/)?.[1] || ''};
+  }
+  nodes['settings-save'] = {};
+  const settings = {concurrency:1, retention_days:30, text_limit:1500, send_interval:1,
+    generation_timeout:1200, call_budget:64, reply_window_minutes:8, reply_message_limit:6};
+  const $ = id => {
+    assert.ok(nodes[id], `missing form field ${id}`);
+    return nodes[id];
+  };
+  const requests = [];
+  const api = async (action, payload) => {
+    if (action === 'list') return {tasks: [], settings};
+    requests.push({action, payload});
+  };
+  const reloadSource = app.slice(app.indexOf('async function reload('), app.indexOf('async function save('));
+  const settingsSource = app.slice(app.indexOf('const settingFields='), app.indexOf("$('archive').onclick="));
+  const reload = vm.runInNewContext(`let tasks=[]; ${reloadSource}\n${settingsSource}\nreload`, {
+    $, api, renderTasks(){}, message(){}, guard: async fn => fn(),
+  });
+  await reload();
+  assert.equal(nodes['reply-window'].value, 8);
+  assert.equal(nodes['reply-limit'].value, 6);
+  nodes['reply-window'].value = '5';
+  nodes['reply-limit'].value = '3';
+  await nodes['settings-save'].onclick();
+  assert.equal(requests[0].action, 'settings');
+  assert.equal(requests[0].payload.values.reply_window_minutes, 5);
+  assert.equal(requests[0].payload.values.reply_message_limit, 3);
+});
+
+test('native conflict choices submit the selected job without a generic confirmation', async () => {
+  const source=app.slice(app.indexOf('function nativeConflictCard('),app.indexOf('async function related('));
+  const requests=[],children=[];
+  const render=vm.runInNewContext(source+'; nativeConflictCard',{
+    api:async(action,payload)=>{requests.push({action,payload});return {message:'done'};},
+    message(){},related:async()=>{},
+    textNode:(tag,text)=>({tag,text}),actionButton:(label,fn)=>({label,fn}),
+  });
+  render({append(...items){children.push(...items);}},{id:'check-1',state:'pending',proposal:{candidates:[
+    {id:'native-1',name:'已有会议',at:'2026-12-01T08:00:00Z',enabled:false,run_once:true},
+  ]}});
+  const buttons=children.filter(item=>item.fn);
+  assert.equal(buttons.length,3);
+  for(const button of buttons)await button.fn();
+  assert.equal(requests[0].payload.values.native_choice,'reuse');
+  assert.equal(requests[0].payload.values.native_job_id,'native-1');
+  assert.equal(requests[1].payload.values.native_choice,'create');
+  assert.equal(requests[2].payload.accept,false);
+});

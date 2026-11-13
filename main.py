@@ -15,6 +15,7 @@ from .digest.runtime import Runtime
 from .digest.interactions import Interactions, Interpreter
 from .digest.native_reminders import NativeReminders
 from .digest.deletion import TaskDeletion
+from .digest.receipts import ReplyRenderer
 
 PLUGIN_NAME = 'astrbot_plugin_daily_digest'
 
@@ -31,7 +32,8 @@ class DailyDigest(Star):
         self.native_reminders = NativeReminders(self.store, context.cron_manager)
         self.runtime = Runtime(self.store, self.service, self.onebot, self.native_reminders)
         self.service.on_ready = self.runtime.freeze
-        self.interactions = Interactions(self.store, Interpreter(self.models), self.runtime)
+        self.interactions = Interactions(self.store, Interpreter(self.models), self.runtime,
+                                         ReplyRenderer(self.models))
         self.deletion = TaskDeletion(self.store, self.service, self.native_reminders)
         self.clock = NativeClock(context.cron_manager)
         self.initialized = False

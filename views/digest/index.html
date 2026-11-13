@@ -23,6 +23,9 @@
         <label>分条间隔（秒）<input id="send-interval" type="number" min="1" value="1"></label>
         <label>生成超时（秒）<input id="generation-timeout" type="number" min="1" value="1200"></label>
         <label>生成调用预算<input id="call-budget" type="number" min="1" value="64"></label>
+        <label>自动识别窗口（分钟）<input id="reply-window" type="number" min="1" value="5"></label>
+        <label>窗口内文字消息上限<input id="reply-limit" type="number" min="1" value="3"></label>
+        <p class="muted">询问成功发送后开始计时。普通闲聊也占用条数，但不会立即结束窗口；引用清单或使用 /日程 可在窗口外操作。修改后用于新发出的询问。</p>
         <button id="settings-save">保存全局设置</button>
       </details>
     </aside>

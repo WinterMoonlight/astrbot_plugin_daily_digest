@@ -5,9 +5,10 @@ from datetime import timedelta
 
 from .domain import parse_time, utcnow
 from .workflow_store import entities, entity, put
+from .native_conflicts import NativeConflictCheck, native_time
 
 
-class NativeReminders:
+class NativeReminders(NativeConflictCheck):
     OWNER = 'astrbot_plugin_daily_digest/reminders/v1'
 
     def __init__(self, store, manager):
@@ -20,7 +21,8 @@ class NativeReminders:
     @staticmethod
     def fingerprint(job):
         return json.dumps([job.name, job.enabled, job.cron_expression, job.timezone,
-                           job.run_once, job.payload], sort_keys=True, default=str)
+                           job.run_once, job.payload, getattr(job, 'description', None),
+                           getattr(job, 'job_type', 'active_agent')], sort_keys=True, default=str)
 
     def payload(self, reminder):
         # Event text is data, never an instruction granting tools or authority.
@@ -32,7 +34,7 @@ class NativeReminders:
         return {'digest_reminder_owner': self.OWNER, 'digest_reminder_id': reminder['id'],
                 'digest_reminder_version': reminder['version'], 'session': reminder['recipient'],
                 'note': note, 'origin': 'tool', 'sender_id': reminder['recipient'].rsplit(':', 1)[-1],
-                'run_at': reminder['remind_at']}
+                'run_at': reminder['remind_at'], 'digest_event': data}
 
     async def sync(self, locked=False):
         if locked:
@@ -95,6 +97,10 @@ class NativeReminders:
                         await self.save(r)
                         return
                     when = utcnow() + timedelta(seconds=3)
+                if not await self.check_before_create(r, jobs):
+                    if r.get('native_job_id'):
+                        await self.sync_one(r, jobs)
+                    return
                 r['native_creating'] = True
                 await self.save(r)  # survives a lost API response / process exit
                 job = await self.manager.add_active_job(
@@ -104,6 +110,7 @@ class NativeReminders:
                     run_once=True, run_at=when)
                 native_id = r['native_job_id'] = job.job_id
                 r['native_version'] = r['version']
+                r.pop('native_resolution', None)
                 jobs[job.job_id] = job
         if job is None:
             r['state'] = 'cancelled' if r['state'] == 'cancelled' else 'native_absent'
@@ -112,10 +119,17 @@ class NativeReminders:
             r.pop('native_error', None)
             await self.save(r)
             return
-        if ((job.payload or {}).get('digest_reminder_owner') != self.OWNER or
+        reused = r.get('native_link_mode') == 'reused'
+        if reused and ((job.payload or {}).get('session') != r['recipient'] or
+                       getattr(job, 'job_type', 'active_agent') != 'active_agent'):
+            r['native_error'] = '复用的原生任务已更换收件人或类型，请在未来任务核对'
+            r['state'] = 'native_reused_changed'
+            await self.save(r)
+            return
+        if not reused and ((job.payload or {}).get('digest_reminder_owner') != self.OWNER or
                 (job.payload or {}).get('digest_reminder_id') != r['id']):
             raise ValueError('原生任务归属已变化，不能修改或取消')
-        if r.get('native_version') != r['version']:
+        if not reused and r.get('native_version') != r['version']:
             if r['state'] == 'cancelled':
                 await self.manager.delete_job(native_id)
                 r['native_version'] = r['version']
@@ -129,6 +143,7 @@ class NativeReminders:
             description = job.description
             if event_changed:
                 payload['note'] = self.payload(r)['note']
+                payload['digest_event'] = self.payload(r)['digest_event']
                 description = payload['note']
             if r.get('immediate'):
                 payload['run_at'] = (utcnow() + timedelta(seconds=3)).isoformat()
@@ -151,16 +166,35 @@ class NativeReminders:
         r['native_schedule'] = payload.get('run_at') if job.run_once else job.cron_expression
         r['native_session'] = payload.get('session')
         if job.run_once and payload.get('run_at'):
-            r['remind_at'] = parse_time(payload['run_at']).isoformat()
+            r['remind_at'] = native_time(payload['run_at'], job.timezone).isoformat()
             r['lead_minutes'] = max(0, (parse_time(r['event_at']) - parse_time(r['remind_at'])).total_seconds()/60)
         r['state'] = 'scheduled' if job.enabled else 'native_paused'
         r.pop('native_error', None)
         await self.save(r)
 
-    async def feedback(self, answer, recipient=None, locked=False):
+    async def feedback(self, answer, recipient=None, locked=False, reminder_ids=None):
         await self.sync(locked=locked)
         reminders = await self.store.call(lambda db: entities(db, 'reminder', recipient))
-        errors = [r['title'] + '：' + r['native_error'] for r in reminders if r.get('native_error')]
-        if errors:
-            return '本次操作已记录，但原生任务尚未确认完成：\n' + '\n'.join(errors)
-        return answer
+        if reminder_ids is not None:
+            reminders = [r for r in reminders if r['id'] in reminder_ids]
+        lines = []
+        for line in answer.splitlines():
+            matches = [r for r in reminders if r['title'] in line]
+            exact = [r for r in matches if r['id'][:8] in line]
+            matches = exact or matches
+            if len(matches) != 1:
+                lines.append(line)
+                continue
+            reminder = matches[0]
+            title = reminder['title']
+            if reminder.get('native_error'):
+                line = f"{title}：原生任务尚未确认完成，{reminder['native_error']}"
+            elif reminder['state'] == 'awaiting_native_choice':
+                line = f"{title}：发现相同时间的原生任务，尚未新建。请按提醒确认消息选择复用、仍然新建或放弃。"
+            elif reminder.get('native_link_mode') == 'reused':
+                state = '启用' if reminder.get('native_enabled') else '停用'
+                line = f"{title}：已复用 {reminder.get('native_name', title)}（{state}），未创建第二份；原任务设置保留。"
+            elif reminder.get('native_job_id') and '将再次核对原生任务' in line:
+                line = f"{title}：已重新核对并新建原生提醒。"
+            lines.append(line)
+        return '\n'.join(lines)

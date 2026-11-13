@@ -29,6 +29,7 @@ async def probe(root):
     from datetime import timedelta
 
     calls = []
+    prompts = []
 
     class Fake(Provider):
         def __init__(self, name, result, window=8192):
@@ -130,6 +131,21 @@ async def probe(root):
     messages, coverage = await snapshot.read(['probe:GroupMessage:1'],
         utcnow()-timedelta(hours=1), utcnow()+timedelta(seconds=1))
     assert len(messages) == 1 and coverage[0]['completeness'] == 'unknown', coverage
+    class GroupNames:
+        calls=0
+        async def call_action(self, action):
+            assert action=='get_group_list'
+            self.calls+=1
+            return [{'group_id':1,'group_name':'课程群'}, {'group_id':2,'group_name':'社团群'}]
+    group_client=GroupNames()
+    group_platforms=SimpleNamespace(platform_insts=[SimpleNamespace(
+        meta=lambda:SimpleNamespace(id='probe',name='aiocqhttp'),bot=group_client)])
+    named_history=NativeHistory(SimpleNamespace(message_history_manager=history,platform_manager=group_platforms))
+    grouped_messages,grouped_coverage=await named_history.read(['probe:GroupMessage:2','probe:GroupMessage:1'],
+        utcnow()-timedelta(hours=1),utcnow()+timedelta(seconds=1))
+    assert [row['group'] for row in grouped_messages]==['probe:GroupMessage:2','probe:GroupMessage:1']
+    assert [row['group_name'] for row in grouped_coverage]==['社团群','课程群']
+    assert group_client.calls==1
     clock = NativeClock(manager)
     await clock.start(tick)
     old_id = clock.job_id
@@ -173,12 +189,50 @@ async def probe(root):
     class FlowManager:
         async def get_provider_by_id(self, name):
             return Fake(name,RuntimeError('simulated')) if name=='primary' else Fake(name,response[0])
+    class Personas:
+        async def resolve_selected_persona(self, **kwargs):
+            return 'native-persona',{'prompt':'称呼用户为主人，语气温和'},None,False
     plugin_context = SimpleNamespace(register_web_api=lambda *args: registrations.append(args),cron_manager=manager,
-        provider_manager=FlowManager(),get_config=context.get_config,message_history_manager=history)
+        provider_manager=FlowManager(),get_config=context.get_config,message_history_manager=history,
+        persona_manager=Personas(),platform_manager=group_platforms)
     plugin = module.DailyDigest(plugin_context)
     await plugin.initialize()
+    native_generate=plugin.models.generate
+    async def capture_generate(prepared,prompt,system):
+        prompts.append(prompt)
+        if '"summary"' in prompt[:300]:
+            assert prepared['persona']=='称呼用户为主人，语气温和'
+            assert prepared['persona'] in system
+        override=None
+        if '\n资料：\n' in prompt:
+            grouped_input=json.loads(prompt.split('\n资料：\n',1)[1])
+            if grouped_input['phase']=='group_messages':
+                override={'facts':[{'text':'群内合成事实','sources':[row['id']]} for row in grouped_input['messages']]}
+        if prompt.startswith('{"purpose":"reminder_receipt_style"'):
+            assert '称呼用户为主人' in system and '提取重要通知' in system
+            from digest.receipts import LABELS
+            override={'opening':'主人，这次的日程明细如下：','closing':'','labels':LABELS}
+        if override is not None:
+            backups=[(provider,provider.result) for provider in prepared['providers'] if not isinstance(provider.result,Exception)]
+            for provider,_ in backups:
+                provider.result=json.dumps(override,ensure_ascii=False)
+            try:
+                return await native_generate(prepared,prompt,system)
+            finally:
+                for provider,result in backups:
+                    provider.result=result
+        return await native_generate(prepared,prompt,system)
+    plugin.models.generate=capture_generate
     assert plugin.initialized and registrations[0][0].endswith('/rpc')
     assert await plugin.store.list_tasks() == []
+    grouped_result=await plugin.service.generator.run(TaskConfig(name='groups',
+        groups=['probe:GroupMessage:1','probe:GroupMessage:2'],provider_id='primary',
+        recipient='probe:FriendMessage:42'),utcnow(),await plugin.store.settings())
+    assert grouped_result['logical_calls']==3
+    group_inputs=[json.loads(prompt.split('\n资料：\n',1)[1]) for prompt in prompts if '\n资料：\n' in prompt]
+    assert [item['group']['name'] for item in group_inputs if item['phase']=='group_messages']==['课程群','社团群']
+    assert [item['group']['id'] for item in group_inputs[-1]['groups']]==['1','2']
+    assert all('group' not in row for item in group_inputs if item['phase']=='group_messages' for row in item['messages'])
     from digest.adapters import SendResult
     from digest.workflow_store import entities
     from astrbot.api.message_components import Reply
@@ -201,15 +255,34 @@ async def probe(root):
             if lists and lists[0]['state']=='active': break
             await asyncio.sleep(.02)
     assert len(receipts)==2,receipts
-    response[0]=json.dumps({'action':'select','list_id':lists[0]['id'],'indices':[1],'evidence':'加入第1项'})
     stopped=[]
     event=SimpleNamespace(get_platform_name=lambda:'aiocqhttp',
-        get_messages=lambda:[Reply(id=2)],unified_msg_origin='probe:FriendMessage:42',
-        message_obj=SimpleNamespace(message_id='user-1'),message_str='加入第1项',stop_event=lambda:stopped.append(True))
+        get_messages=lambda:[],unified_msg_origin='probe:FriendMessage:42',
+        message_obj=SimpleNamespace(message_id='crossed-chat'),message_str='刚才聊到一半的话题',stop_event=lambda:stopped.append(True))
+    response[0]=json.dumps({'action':'ignore'})
+    calls_before=len(calls)
     await plugin.on_private(event)
+    assert len(calls)>calls_before and not stopped
+    response[0]=json.dumps({'action':'ask','question':'第一项提前半小时还是一小时？'})
+    event.message_obj.message_id='clarification';event.message_str='第一项帮我选个提前量'
+    await plugin.on_private(event)
+    async with asyncio.timeout(8):
+        while not any(item['channel']=='reply' and item['state']=='active'
+                      for item in await plugin.store.call(lambda db:entities(db,'dialogue'))):
+            await asyncio.sleep(.02)
+    response[0]=json.dumps({'action':'select','list_id':lists[0]['id'],'indices':[1],
+                            'lead_minutes':60,'evidence':'一小时'})
+    event.message_obj.message_id='user-1';event.message_str='一小时'
+    await plugin.on_private(event)
+    parsed_prompt=json.loads(next(prompt for prompt in reversed(prompts) if prompt.startswith('{"user_message"')))
+    assert [turn['content'] for turn in parsed_prompt['context']['conversation']]==[
+        '第一项帮我选个提前量','第一项提前半小时还是一小时？']
     await plugin.on_private(event)
     reminders=await plugin.store.call(lambda db:entities(db,'reminder'))
-    assert len(reminders)==1 and len(stopped)==2
+    assert len(reminders)==1 and len(stopped)==3 and reminders[0]['lead_minutes']==60
+    receipt=await plugin.store.call(lambda db:db.execute(
+        "SELECT result FROM interactions WHERE message_id='user-1'").fetchone()[0])
+    assert '主人' in receipt and '事项时间' in receipt and '实际提醒' in receipt and '任务状态' in receipt
     native_id=reminders[0]['native_job_id']
     native_job=next(j for j in await manager.list_jobs() if j.job_id==native_id)
     assert native_job.job_type=='active_agent' and native_job.run_once and native_job.persistent
@@ -223,8 +296,9 @@ async def probe(root):
     assert synced['state']=='native_paused' and synced['remind_at']==changed_at
     response[0]=json.dumps({'action':'ignore'})
     event.message_obj.message_id='user-2';event.message_str='今天天气怎样'
+    calls_before=len(calls)
     await plugin.on_private(event)
-    assert len(stopped)==2,'unrelated chat should not be stopped'
+    assert len(stopped)==3 and len(calls)==calls_before,'closed window must bypass the model'
     await plugin.service.archive(saved['id'],saved['version'])
     async with asyncio.timeout(5):
         while True:
@@ -248,7 +322,9 @@ async def probe(root):
         provider_id='primary',recipient='probe:FriendMessage:42'))
     from digest.workflow_store import put,uid
     synthetic={**orphan,'id':uid(),'task_id':other['id'],'task_ids':[other['id']],
-               'list_ids':[],'version':1,'state':'scheduled'}
+               'list_ids':[],'version':1,'state':'scheduled','title':'独立的取消测试',
+               'event_at':(utcnow()+timedelta(hours=6)).isoformat(),
+               'remind_at':(utcnow()+timedelta(hours=5)).isoformat()}
     synthetic={k:v for k,v in synthetic.items() if not k.startswith('native_')}
     synthetic['native_owned']=True
     await plugin.store.call(lambda db:put(db,'reminder',synthetic))
@@ -268,6 +344,38 @@ async def probe(root):
     await plugin.native_reminders.sync()
     assert (await plugin.store.call(lambda db:entities(db,'reminder')))[0]['state']=='native_absent'
     assert not await manager.list_jobs()
+    # Check reuse and recurring collisions with the real host API, still in the isolated DB.
+    target=(utcnow()+timedelta(hours=5)).replace(second=0,microsecond=0)
+    foreign=await manager.add_active_job(name='已有原生日程',cron_expression=None,
+        payload={'session':'probe:FriendMessage:42','sender_id':'42','note':'提醒我参加已有原生日程'},
+        timezone='UTC',run_once=True,run_at=target)
+    external_snapshot=plugin.native_reminders.fingerprint(foreign)
+    reused={k:v for k,v in orphan.items() if not k.startswith('native_')}
+    reused.update(id=uid(),task_id='',task_ids=[],list_ids=[],version=1,state='scheduled',
+        native_owned=True,title='已有原生日程',place='',remind_at=target.isoformat(),
+        event_at=(target+timedelta(minutes=30)).isoformat(),timezone='UTC')
+    await plugin.store.call(lambda db:put(db,'reminder',reused))
+    await plugin.native_reminders.sync()
+    found=next(r for r in await plugin.store.call(lambda db:entities(db,'reminder')) if r['id']==reused['id'])
+    assert found['native_link_mode']=='reused' and found['native_job_id']==foreign.job_id
+    assert len(await manager.list_jobs())==1
+    assert plugin.native_reminders.fingerprint((await manager.list_jobs())[0])==external_snapshot
+    await manager.delete_job(foreign.job_id)
+    await plugin.native_reminders.sync()
+    recurring=await manager.add_active_job(name='已有周期任务',
+        cron_expression=f'{target.minute} {target.hour} * * *',
+        payload={'session':'probe:FriendMessage:42','sender_id':'42','note':'另外一个周期任务'},timezone='UTC')
+    pending={**reused,'id':uid(),'title':'新的独立事项'}
+    await plugin.store.call(lambda db:put(db,'reminder',pending))
+    await plugin.native_reminders.sync()
+    changes=await plugin.store.call(lambda db:entities(db,'change'))
+    conflict=next(c for c in changes if c['proposal'].get('reminder_id')==pending['id'] and c['state']=='pending')
+    assert conflict['proposal']['candidates'][0]['id']==recurring.job_id
+    assert len(await manager.list_jobs())==1
+    await plugin.interactions.manage_change(conflict['id'],True,{'native_choice':'create'})
+    assert len(await manager.list_jobs())==2
+    for job in await manager.list_jobs():
+        await manager.delete_job(job.job_id)
     manager.scheduler.shutdown(wait=False)
     await asyncio.sleep(0.02)
     await db.engine.dispose()
@@ -284,6 +392,14 @@ async def probe(root):
             'native_reminder_create_edit_pause_delete_persist': 'pass',
             'native_task_deletion_keep_and_cancel': 'pass', 'orphan_reminder_private_command': 'pass',
             'native_custom_note_and_timezone_preserved': 'pass',
+            'reply_window_crossed_chat': 'pass', 'native_multiturn_clarification': 'pass',
+            'ordinary_chat_bypasses_model_after_selection': 'pass',
+            'native_existing_job_reuse': 'pass', 'native_recurring_collision': 'pass',
+            'native_collision_explicit_create': 'pass',
+            'persona_and_task_prompt_receipt': 'pass', 'authoritative_receipt_time_and_state': 'pass',
+            'shared_persona_summary_and_receipt': 'pass',
+            'native_group_history_order_and_names': 'pass', 'native_grouped_summary_pipeline': 'pass',
+            'native_group_envelope_without_repeated_labels': 'pass',
             'live_model_calls': 0, 'qq_messages': 0}
 
 

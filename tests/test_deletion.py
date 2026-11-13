@@ -99,10 +99,11 @@ class DeletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.store.get_task(second['id']))['enabled'])
 
     async def test_cancel_failure_is_resumable_and_never_recreates_deleted_jobs(self):
-        list_id=await self.formal(candidates=[self.candidate(title='one'),self.candidate(title='two')])
+        list_id=await self.formal(candidates=[self.candidate(title='one'),self.candidate(hours=4,title='two')])
         await self.drain()
         self.parser.intent={'action':'select','list_id':list_id,'indices':[1,2]}
         await self.interactions.handle(config().recipient,uid(),f'清单 {list_id[:8]} 加入1和2')
+        self.assertEqual(len(self.manager.jobs),2)
         await self.archived()
         original=self.manager.delete_job
         calls=[]
@@ -293,3 +294,22 @@ class DeletionTests(unittest.IsolatedAsyncioTestCase):
         orphan=(await self.reminders())[0]
         self.assertEqual(orphan['interaction_config']['recipient'],r['recipient'])
         self.assertEqual(orphan['interaction_config']['timezone'],r['timezone'])
+
+    async def test_delete_erases_followup_context_and_old_quote_cannot_operate(self):
+        ident=await self.active_list()
+        self.parser.intent={'action':'ask','question':'敏感追问：希望提前多久？'}
+        message_id=uid()
+        await self.interactions.handle(config().recipient,message_id,f'清单 {ident[:8]} 帮我选择')
+        await self.drain()
+        windows=await self.store.call(lambda db:entities(db,'dialogue'))
+        self.assertTrue(any(item['turns'] for item in windows))
+        quote=await self.store.call(lambda db:db.execute(
+            "SELECT receipt FROM outbox WHERE owner=? AND channel='reply'",(config().recipient+'/'+message_id,)).fetchone()[0])
+        await self.archived()
+        await self.remove()
+        windows=await self.store.call(lambda db:entities(db,'dialogue'))
+        self.assertTrue(all(not item['turns'] and not any(item['refs'].values()) for item in windows))
+        self.assertNotIn('敏感追问',str(windows))
+        calls=self.parser.calls
+        self.assertTrue(await self.interactions.handle(config().recipient,uid(),'一小时',quote))
+        self.assertEqual(self.parser.calls,calls)
