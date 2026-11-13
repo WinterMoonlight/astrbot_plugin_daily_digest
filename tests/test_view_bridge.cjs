@@ -38,6 +38,8 @@ test('reply window settings load and save through the management form', async ()
     nodes[match[1]] = {value: match[0].match(/value="([^"]*)"/)?.[1] || ''};
   }
   nodes['settings-save'] = {};
+  for (const id of ['settings-open','settings-close','settings-dismiss','settings-form']) nodes[id] = {};
+  nodes['settings-dialog'] = {close(){this.closed=true;},showModal(){this.closed=false;}};
   const settings = {concurrency:1, retention_days:30, text_limit:1500, send_interval:1,
     generation_timeout:1200, call_budget:64, reply_window_minutes:8, reply_message_limit:6};
   const $ = id => {
@@ -51,7 +53,7 @@ test('reply window settings load and save through the management form', async ()
   };
   const reloadSource = app.slice(app.indexOf('async function reload('), app.indexOf('async function save('));
   const settingsSource = app.slice(app.indexOf('const settingFields='), app.indexOf("$('archive').onclick="));
-  const reload = vm.runInNewContext(`let tasks=[]; ${reloadSource}\n${settingsSource}\nreload`, {
+  const reload = vm.runInNewContext(`let tasks=[],savedSettings={},initialized=true; ${reloadSource}\n${settingsSource}\nreload`, {
     $, api, renderTasks(){}, message(){}, guard: async fn => fn(),
   });
   await reload();
@@ -59,10 +61,14 @@ test('reply window settings load and save through the management form', async ()
   assert.equal(nodes['reply-limit'].value, 6);
   nodes['reply-window'].value = '5';
   nodes['reply-limit'].value = '3';
-  await nodes['settings-save'].onclick();
+  await nodes['settings-form'].onsubmit({preventDefault(){}});
   assert.equal(requests[0].action, 'settings');
   assert.equal(requests[0].payload.values.reply_window_minutes, 5);
   assert.equal(requests[0].payload.values.reply_message_limit, 3);
+  assert.equal(nodes['settings-dialog'].closed, true);
+  nodes['reply-window'].value = '99';
+  nodes['settings-open'].onclick();
+  assert.equal(nodes['reply-window'].value, 5, 'opening discards unsaved field edits');
 });
 
 test('native conflict choices submit the selected job without a generic confirmation', async () => {

@@ -1,6 +1,7 @@
 """Local UI fixture only: serves view assets and a fake bridge, never the repo root."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'views/digest'
@@ -11,6 +12,7 @@ class Handler(BaseHTTPRequestHandler):
         name = self.path.split('?', 1)[0]
         routes = {'/': ('text/html; charset=utf-8', ASSETS / 'index.html'),
                   '/app.js': ('text/javascript; charset=utf-8', ASSETS / 'app.js'),
+                  '/ui.js': ('text/javascript; charset=utf-8', ASSETS / 'ui.js'),
                   '/style.css': ('text/css; charset=utf-8', ASSETS / 'style.css'),
                   '/fixture.js': ('text/javascript; charset=utf-8', ROOT / 'tests/ui_fixture.js')}
         if name not in routes:
@@ -20,6 +22,9 @@ class Handler(BaseHTTPRequestHandler):
         content = path.read_text(encoding='utf-8')
         if name == '/':
             content = content.replace('<script type="module"', '<script src="/fixture.js"></script><script type="module"')
+            theme = parse_qs(urlsplit(self.path).query).get('theme', [''])[0]
+            if theme in ('light', 'dark'):
+                content = content.replace('<html lang="zh-CN">', f'<html lang="zh-CN" data-theme="{theme}">')
         data = content.encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', kind)

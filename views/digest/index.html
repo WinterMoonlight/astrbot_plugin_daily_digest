@@ -8,74 +8,103 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <header><div><p class="eyebrow">ASTRBOT · DAILY DIGEST</p><h1>多群每日简报</h1></div><button id="refresh">刷新</button></header>
-  <p class="notice">任务保存后默认停用。启用后从下一计划时点生成并私聊投递；预览只展示结果，提醒由收件人选择后创建。</p>
+<div class="page-shell">
+  <header class="page-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M6 3.5h9l3 3V20H6zM15 3.5V7h3M9 11h6M9 14h6M9 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <div><p class="eyebrow">DAILY DIGEST / ASTRBOT</p><h1>多群每日简报</h1><p class="page-subtitle">把群聊里的重要消息，整理成你的日常简报。</p></div>
+    </div>
+    <div class="header-actions"><button id="settings-open" class="secondary">全局设置</button><button id="refresh" class="quiet">刷新</button></div>
+  </header>
+  <div class="notice"><span class="notice-dot" aria-hidden="true"></span><p><strong>先预览，再启用。</strong>新任务默认停用，启用后从下一个计划时间开始发送；日程提醒由收件人选择后创建。</p></div>
   <div id="message" role="status" aria-live="polite">正在加载任务与可选配置…</div>
   <div class="layout" inert>
-    <aside>
-      <div class="section-title"><h2>任务</h2><button id="new">＋ 新建</button></div>
-      <div id="tasks"></div>
-      <label class="inline"><input type="checkbox" id="show-archived">显示归档任务（仍可管理已有提醒）</label>
-      <details><summary>全局设置</summary>
-        <label>同时生成上限<input id="concurrency" type="number" min="1" value="1"></label>
-        <label>执行详情保留天数<input id="retention" type="number" min="1" value="30"></label>
-        <label>单条文字长度<input id="text-limit" type="number" min="32" value="1500"></label>
-        <label>分条间隔（秒）<input id="send-interval" type="number" min="1" value="1"></label>
-        <label>生成超时（秒）<input id="generation-timeout" type="number" min="1" value="1200"></label>
-        <label>生成调用预算<input id="call-budget" type="number" min="1" value="64"></label>
-        <label>自动识别窗口（分钟）<input id="reply-window" type="number" min="1" value="5"></label>
-        <label>窗口内文字消息上限<input id="reply-limit" type="number" min="1" value="3"></label>
-        <p class="muted">询问成功发送后开始计时。普通闲聊也占用条数，但不会立即结束窗口；引用清单或使用 /日程 可在窗口外操作。修改后用于新发出的询问。</p>
-        <button id="settings-save">保存全局设置</button>
-      </details>
+    <aside class="sidebar" aria-label="简报任务列表">
+      <div class="sidebar-heading"><div><p class="eyebrow">WORKSPACE</p><h2>我的简报 <span id="task-count" class="count">0</span></h2></div></div>
+      <button id="new" class="new-task"><span aria-hidden="true">＋</span> 新建任务</button>
+      <div id="tasks" class="task-list"></div>
+      <div class="sidebar-footer"><label class="check-row"><input type="checkbox" id="show-archived"><span>显示归档任务</span></label><p class="muted">每个任务可独立设置源群、模型与发送计划。</p></div>
     </aside>
-    <main>
-      <div class="section-title"><h2 id="task-title">新建任务</h2><span class="badge" id="task-status">默认停用</span></div>
-      <nav aria-label="任务详情"><button data-tab="config" aria-current="page">配置</button><button data-tab="preview">预览</button><button data-tab="records">执行记录</button><button data-tab="reminders">关联提醒</button></nav>
-      <section id="config" class="tab">
+    <main class="editor">
+      <div class="editor-heading"><div><p class="eyebrow">DIGEST SETTINGS</p><h2 id="task-title">新建任务</h2></div><span class="badge" id="task-status" data-state="draft">未保存</span></div>
+      <nav class="tabs" aria-label="任务详情" role="tablist">
+        <button id="tab-config" data-tab="config" role="tab" aria-selected="true" aria-controls="config" aria-current="page">任务配置</button>
+        <button id="tab-preview" data-tab="preview" role="tab" aria-selected="false" aria-controls="preview" tabindex="-1">简报预览</button>
+        <button id="tab-records" data-tab="records" role="tab" aria-selected="false" aria-controls="records" tabindex="-1">执行记录</button>
+        <button id="tab-reminders" data-tab="reminders" role="tab" aria-selected="false" aria-controls="reminders" tabindex="-1">日程与提醒</button>
+      </nav>
+      <section id="config" class="tab" role="tabpanel" aria-labelledby="tab-config">
         <form id="form">
-          <label>任务名称<input name="name" placeholder="例如：课程通知" maxlength="200"></label>
-          <div class="grid"><label>主模型<select name="provider_id"></select></label><label>人格（可选）<select name="persona_id"></select></label></div>
-          <label>选择源群<select id="group-picker"><option value="">选择群后添加</option></select></label>
-          <label>源群 UMO（每行一个）<textarea name="groups" rows="3" placeholder="平台实例:GroupMessage:群号"></textarea></label>
-          <label>私聊收件人 UMO<input name="recipient" placeholder="私聊机器人发送 /sid 获取"></label>
-          <div class="grid"><label>频率<select name="frequency"><option value="daily">每日</option><option value="weekly">每周</option></select></label><label>执行时间<input name="time" type="time" value="08:00"></label></div>
-          <div id="weekdays"><span>每周执行日</span><div class="day-options"></div></div>
-          <div class="grid"><label>时区<input name="timezone" value="Asia/Shanghai"></label><label>回看时长（小时）<input name="lookback_hours" type="number" min="1" value="24"></label></div>
-          <label>总结提示词<textarea name="prompt" rows="6"></textarea></label>
-          <div class="grid triple"><label>默认提前（分钟）<input name="lead_minutes" type="number" min="0" value="30"></label><label>候选日期天数<input name="candidate_days" type="number" min="1" value="7"></label><label>清单有效（小时）<input name="selection_hours" type="number" min="1" value="24"></label></div>
-          <div class="actions"><button type="submit" class="primary" id="save">保存配置</button><button type="button" id="toggle">启用任务</button><button type="button" id="archive">归档任务</button><button type="button" class="danger" id="delete-task" disabled>彻底删除任务</button></div>
-          <p class="muted">彻底删除需先归档；删除前可查看范围，并选择是否取消该任务独有的提醒。</p>
+          <section class="config-section" aria-labelledby="source-title">
+            <div class="section-heading"><span class="section-number">01</span><div><h3 id="source-title">消息与投递</h3><p>选择要关注的群，以及接收简报的人。</p></div></div>
+            <div class="grid"><div class="field"><div class="field-label"><label for="task-name">任务名称</label><button type="button" class="help" aria-label="任务名称说明" data-help="为这份简报取一个容易区分的名字。不同任务可以使用不同的群、模型和时间。">?</button></div><input id="task-name" name="name" placeholder="例如：课程通知" maxlength="200"></div>
+<div class="field"><div class="field-label"><label for="recipient">私聊收件人</label><button type="button" class="help" aria-label="私聊收件人说明" data-help="填写完整的私聊会话标识（UMO），不是单独的 QQ 号。让收件人私聊机器人发送 /sid，即可获取。">?</button></div><input id="recipient" name="recipient" placeholder="平台实例:FriendMessage:QQ号" spellcheck="false"><p class="field-hint">私聊机器人发送 <code>/sid</code>，获取会话标识。</p></div></div>
+            <div class="field"><div class="field-label"><label for="group-picker">消息来源</label><button type="button" class="help" aria-label="消息来源说明" data-help="可以添加多个源群。插件会先分别整理各群，再合并为一份简报。机器人需要在群内，且 AstrBot 已开启并保留相应群历史。">?</button><span id="group-count" class="field-meta">未选择</span></div><select id="group-picker"><option value="">选择一个群，添加到简报</option></select><div id="selected-groups" class="group-chips" aria-label="已选择的源群"></div></div>
+            <details class="manual-groups"><summary>手动填写群会话标识</summary><div class="field"><label for="source-groups">源群 UMO · 每行一个</label><textarea id="source-groups" name="groups" rows="3" placeholder="平台实例:GroupMessage:群号" spellcheck="false"></textarea><p class="field-hint">列表中找不到群时可手动填写。这里与上方已选群同步。</p></div></details>
+          </section>
+          <section class="config-section" aria-labelledby="content-title">
+            <div class="section-heading"><span class="section-number">02</span><div><h3 id="content-title">内容与表达</h3><p>决定简报关注什么，以及如何表达。</p></div></div>
+            <div class="grid"><div class="field"><div class="field-label"><label for="provider">总结模型</label><button type="button" class="help" aria-label="总结模型说明" data-help="使用 AstrBot 中已配置的聊天模型。请确认模型上下文上限有效；主模型失败时，沿用收件人会话配置的备用模型。">?</button></div><select id="provider" name="provider_id"></select></div>
+<div class="field"><div class="field-label"><label for="persona">人格（可选）</label><button type="button" class="help" aria-label="人格（可选）说明" data-help="总结正文和日程结果回执统一使用这里选择的人格。留空时沿用收件人的 AstrBot 会话人格。人格控制语气，具体总结要求由下方提示词补充。">?</button></div><select id="persona" name="persona_id"></select></div></div>
+            <div class="field"><div class="field-label"><label for="summary-prompt">总结提示词</label><button type="button" class="help" aria-label="总结提示词说明" data-help="告诉模型哪些消息值得保留、如何分类，以及期望的长度和表达方式。可以补充你与群的关系，例如“我是班级学生，优先关注作业和考试”。此提示词也约束结果回执中适用的表达要求。">?</button></div><textarea id="summary-prompt" name="prompt" class="prompt-input" rows="5" placeholder="例如：优先整理课程通知、作业截止时间和活动安排…"></textarea><p class="field-hint">写清关注范围、分类方式和篇幅，让简报更贴近你的需要。</p></div>
+          </section>
+          <section class="config-section" aria-labelledby="schedule-title">
+            <div class="section-heading"><span class="section-number">03</span><div><h3 id="schedule-title">运行计划</h3><p>设定发送节奏，以及每次回看多长时间的消息。</p></div></div>
+            <div class="grid triple"><div class="field"><div class="field-label"><label for="frequency">执行频率</label><button type="button" class="help" aria-label="执行频率说明" data-help="每日按固定时间执行；每周可选择一个或多个星期。启用后从下一个计划时间开始，停机遗漏不会自动批量补跑。">?</button></div><select id="frequency" name="frequency"><option value="daily">每日</option><option value="weekly">每周</option></select></div>
+<div class="field"><div class="field-label"><label for="schedule-time">执行时间</label><button type="button" class="help" aria-label="执行时间说明" data-help="到计划时间后开始生成，生成完成再发送。实际收到的时间会受到排队、模型速度和网络情况影响。">?</button></div><input id="schedule-time" name="time" type="time" value="08:00"></div>
+<div class="field"><div class="field-label"><label for="timezone">时区</label><button type="button" class="help" aria-label="时区说明" data-help="执行时间、日期解释和日程显示使用此时区。北京时间填写 Asia/Shanghai，服务器所在时区可以与此不同。">?</button></div><input id="timezone" name="timezone" value="Asia/Shanghai" spellcheck="false"></div></div>
+            <div id="weekdays" class="weekday-field"><span class="field-label">每周执行日</span><div class="day-options" role="group" aria-label="每周执行日"></div></div>
+            <div class="lookback-row"><div class="field"><div class="field-label"><label for="lookback">消息回看时长</label><button type="button" class="help" aria-label="消息回看时长说明" data-help="从原计划时间向前读取这段时长内的消息。例如每天 08:00、回看 24 小时，会读取前一天 08:00 至当天 08:00 的历史。延迟执行不顺延范围。它不是历史保存时长，无法恢复已清理的消息。">?</button></div><div class="input-unit"><input id="lookback" name="lookback_hours" type="number" min="1" value="24"><span>小时</span></div></div><p class="field-hint">每日默认 24 小时，每周默认 168 小时。<br>读取范围取决于 AstrBot 仍保留的群历史。</p></div>
+          </section>
+          <section class="config-section" aria-labelledby="reminder-title">
+            <div class="section-heading"><span class="section-number">04</span><div><h3 id="reminder-title">日程提醒</h3><p>从简报中提取日程，由收件人决定是否添加。</p></div></div>
+            <div class="grid triple"><div class="field"><div class="field-label"><label for="lead">默认提前量</label><button type="button" class="help" aria-label="默认提前量说明" data-help="默认在事项开始前多少分钟提醒，0 表示按开始时间提醒。收件人本次明确指定的时间优先。如果算出的提醒时间已过去，会先询问。">?</button></div><div class="input-unit"><input id="lead" name="lead_minutes" type="number" min="0" value="30"><span>分钟</span></div></div>
+<div class="field"><div class="field-label"><label for="candidate-days">候选日期范围</label><button type="button" class="help" aria-label="候选日期范围说明" data-help="只把今天及随后若干天内、尚未开始的事项列为可添加日程。7 表示今天及随后 6 天，不影响消息回看范围。">?</button></div><div class="input-unit"><input id="candidate-days" name="candidate_days" type="number" min="1" value="7"><span>天</span></div></div>
+<div class="field"><div class="field-label"><label for="selection-hours">清单有效期</label><button type="button" class="help" aria-label="清单有效期说明" data-help="询问成功发送后允许补选的时长。补选不续期，同一任务的新简报会替换旧清单。它不同于全局设置中的自动识别窗口：窗口结束后，仍可引用有效清单继续选择。">?</button></div><div class="input-unit"><input id="selection-hours" name="selection_hours" type="number" min="1" value="24"><span>小时</span></div></div></div>
+            <div class="inline-note">自动识别回复的时长与条数，在右上角的<strong>全局设置</strong>中调整。</div>
+          </section>
+          <div class="save-bar"><p>编辑后请保存配置</p><div class="actions"><button type="button" id="toggle" class="secondary">启用任务</button><button type="submit" class="primary" id="save">保存配置</button></div></div>
+          <details class="task-management"><summary>任务管理<span>归档与删除</span></summary><div class="management-content"><p class="muted">归档后停止后续简报，已有提醒仍可管理。彻底删除前需要先归档，并核对关联数据。</p><div class="actions"><button type="button" id="archive">归档任务</button><button type="button" class="danger" id="delete-task" disabled>彻底删除任务</button></div></div></details>
         </form>
       </section>
-      <section id="preview" class="tab" hidden>
-        <p class="muted">预览会调用模型并可能产生费用；使用本页配置，先保存再生成，不发送 QQ 消息。</p>
-        <button id="generate" class="primary">保存并生成预览</button>
-        <p id="preview-state"></p><pre id="preview-text" class="result">尚无预览。</pre>
-        <details><summary>消息覆盖与生成信息</summary><pre id="preview-meta"></pre></details>
-        <section id="delivery-panel" hidden><h3>本次计划的投递与补发</h3>
-          <p class="muted">先查看正文和分条状态，再提交补发。成功分条不会重发；未知结果需先到 QQ 核对后标记。正文已清理或未生成时，将按原计划窗口读取现存历史重新生成。</p>
-          <div class="actions"><button id="catchup-preview">准备补发预览</button><button id="resend-digest">确认补发未成功的简报</button><button id="resend-inquiry">单独补发日程询问</button><button id="delivery-refresh">刷新状态</button></div>
-          <div id="delivery-parts"></div>
-        </section>
+      <section id="preview" class="tab tab-content" role="tabpanel" aria-labelledby="tab-preview" hidden>
+        <div class="panel-intro"><div><h3>预览这份简报</h3><p>使用当前配置生成，检查内容后再启用自动发送。</p></div><button id="generate" class="primary">保存并生成预览</button></div>
+        <p class="inline-note">预览会调用所选模型并可能产生费用，不发送 QQ 消息，也不创建提醒。</p>
+        <p id="preview-state" class="preview-state"></p><pre id="preview-text" class="result">还没有预览。准备好配置后，生成第一份简报。</pre>
+        <details class="detail-panel"><summary>消息覆盖与生成信息</summary><pre id="preview-meta"></pre></details>
+        <section id="delivery-panel" class="detail-panel" hidden><h3>本次计划的投递与补发</h3><p class="muted">先核对正文和分条状态。成功部分不会重复发送，未知结果需先到 QQ 核实。</p><div class="actions"><button id="catchup-preview">准备补发预览</button><button id="resend-digest">补发未成功的简报</button><button id="resend-inquiry">单独补发日程询问</button><button id="delivery-refresh" class="quiet">刷新状态</button></div><div id="delivery-parts"></div></section>
       </section>
-      <section id="records" class="tab" hidden><div id="run-list">选择任务后查看记录。</div><button id="more">下一页</button></section>
-      <section id="reminders" class="tab" hidden><p class="muted">提醒逐条加入 AstrBot「未来任务」，可在那里修改、停用和删除；到点由原生模型/工具执行，本插件不额外重试。原生一次性任务执行后会移除，消失不代表已送达。提醒独立于简报任务；停用或归档简报不会取消提醒。时间显示带时区，修改时间请填写带时区的 ISO 时间，例如 2026-12-01T14:30:00+08:00。</p><button id="related-refresh">刷新关联提醒</button><div id="related-list"></div></section>
+      <section id="records" class="tab tab-content" role="tabpanel" aria-labelledby="tab-records" hidden><div class="panel-intro"><div><h3>执行记录</h3><p>查看每次预览、定时生成及投递结果。</p></div></div><div id="run-list" class="record-list">选择任务后查看记录。</div><div class="pagination"><span id="record-page" class="muted">第 1 页</span><div class="actions"><button id="previous-page" disabled>上一页</button><button id="more">下一页</button></div></div></section>
+      <section id="reminders" class="tab tab-content" role="tabpanel" aria-labelledby="tab-reminders" hidden>
+        <div class="panel-intro"><div><h3>日程与提醒</h3><p>跟进候选清单、已关联提醒与待确认变更。</p></div><button id="related-refresh">刷新提醒</button></div>
+        <div class="inline-note">已创建的提醒独立于简报任务。停用或归档简报，不会取消这些提醒。</div>
+        <details class="detail-panel"><summary>关于提醒状态与时间</summary><p class="muted">提醒在 AstrBot「未来任务」中执行。原生一次性任务执行后可能被移除，消失不代表已送达，请结合 QQ 消息核对。修改时间时填写带时区的 ISO 时间，例如 2026-12-01T14:30:00+08:00；复用的原生任务请在「未来任务」中管理。</p></details>
+        <div id="related-list"></div>
+      </section>
     </main>
   </div>
-  <dialog id="delete-dialog" aria-labelledby="delete-title">
-    <h2 id="delete-title">彻底删除任务</h2>
-    <p id="delete-name"></p>
-    <p id="delete-counts"></p>
-    <p>任务配置、执行记录、简报正文和候选清单将永久删除，无法在页面恢复。仅保留不含正文的最小防重复处理凭据。</p>
-    <p id="delete-legacy" class="muted"></p>
-    <label class="inline"><input type="checkbox" id="delete-reminders">同时取消该任务独有的提醒（默认保留）</label>
-    <p id="delete-shared" class="muted"></p>
-    <p class="muted">保留的提醒仍可在 AstrBot「未来任务」管理。已发送的 QQ 消息、AstrBot 群历史、宿主日志及已有备份不受影响。</p>
-    <label>输入“彻底删除”确认<input id="delete-confirmation" autocomplete="off"></label>
-    <p id="delete-error" role="alert"></p>
-    <div class="actions"><button id="delete-cancel">取消</button><button id="delete-confirm" class="danger" disabled>确认彻底删除</button></div>
-  </dialog>
-  <script type="module" src="./app.js"></script>
+  <footer class="page-footer">多群每日简报 <span>·</span> 源于群聊，聚焦重要的事</footer>
+</div>
+<dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+  <div class="dialog-heading"><div><p class="eyebrow">GLOBAL PREFERENCES</p><h2 id="settings-title">全局设置</h2><p class="muted">应用于所有简报任务。</p></div><button id="settings-close" class="icon-button" aria-label="关闭全局设置">×</button></div>
+  <form id="settings-form">
+    <section class="settings-section"><h3>生成与资源</h3><p class="section-description">控制排队速度与单次生成的资源投入。</p><div class="grid triple"><div class="field"><div class="field-label"><label for="concurrency">同时生成上限</label><button type="button" class="help" aria-label="同时生成上限说明" data-help="最多同时生成几份简报，其余排队，同一任务仍串行执行。调高会增加模型与服务器的同时负载。">?</button></div><div class="input-unit"><input id="concurrency" type="number" min="1" value="1"><span>份</span></div></div>
+<div class="field"><div class="field-label"><label for="generation-timeout">生成超时</label><button type="button" class="help" aria-label="生成超时说明" data-help="一份简报生成过程的总时间上限，包含逐群提取和最终汇总。超时会标记失败，不发送半成品。默认 1200 秒，即 20 分钟。">?</button></div><div class="input-unit"><input id="generation-timeout" type="number" min="1" value="1200"><span>秒</span></div></div>
+<div class="field"><div class="field-label"><label for="call-budget">生成调用预算</label><button type="button" class="help" aria-label="生成调用预算说明" data-help="单次生成最多进行多少次逻辑模型调用，包含逐群分块、压缩和最终汇总。不是 token 上限，也不包含宿主模型内部的重试次数。">?</button></div><div class="input-unit"><input id="call-budget" type="number" min="1" value="64"><span>次</span></div></div></div></section>
+    <section class="settings-section"><h3>发送与记录</h3><p class="section-description">设置长文的发送节奏，以及执行详情保留多久。</p><div class="grid triple"><div class="field"><div class="field-label"><label for="text-limit">单条文字长度</label><button type="button" class="help" aria-label="单条文字长度说明" data-help="长简报按此字符预算分条发送，分条编号也计算在内。此项不是 QQ 平台的保证上限，至少填写 32。">?</button></div><div class="input-unit"><input id="text-limit" type="number" min="32" value="1500"><span>字符</span></div></div>
+<div class="field"><div class="field-label"><label for="send-interval">分条发送间隔</label><button type="button" class="help" aria-label="分条发送间隔说明" data-help="两条消息之间至少等待的秒数，降低连续发送的频率。不会改变简报的消息回看范围。">?</button></div><div class="input-unit"><input id="send-interval" type="number" min="1" value="1"><span>秒</span></div></div>
+<div class="field"><div class="field-label"><label for="retention">执行详情保留</label><button type="button" class="help" aria-label="执行详情保留说明" data-help="清理符合条件的旧简报正文与执行详情。被未完成业务引用的数据会延后清理，必要防重与回执标记保留；不控制 AstrBot 原始群历史。">?</button></div><div class="input-unit"><input id="retention" type="number" min="1" value="30"><span>天</span></div></div></div></section>
+    <section class="settings-section"><h3>回复识别</h3><p class="section-description">让收件人可以直接回复日程，同时减少对普通聊天的打扰。</p><div class="grid"><div class="field"><div class="field-label"><label for="reply-window">自动识别窗口</label><button type="button" class="help" aria-label="自动识别窗口说明" data-help="日程询问全部确认发送成功后开始计时。窗口内的有效文字消息可进入日程判断；新追问成功发送后会开启新窗口。它不等于清单有效期。">?</button></div><div class="input-unit"><input id="reply-window" type="number" min="1" value="5"><span>分钟</span></div></div>
+<div class="field"><div class="field-label"><label for="reply-limit">窗口内消息上限</label><button type="button" class="help" aria-label="窗口内消息上限说明" data-help="窗口内最多判断多少条有效文字消息。普通闲聊也占条数，但第一条闲聊不会立即关窗。空文本和重复上报不额外计数。时间或条数任一用尽后停止自动识别。">?</button></div><div class="input-unit"><input id="reply-limit" type="number" min="1" value="3"><span>条</span></div></div></div><p class="inline-note">窗口结束后，仍可引用有效清单、带上编号，或使用 <code>/日程</code>。修改设置用于新发出的询问，已有窗口保留原规则。</p></section>
+    <div class="dialog-actions"><button type="button" id="settings-dismiss">取消</button><button type="submit" id="settings-save" class="primary">保存全局设置</button></div>
+  </form>
+</dialog>
+<dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-title">
+  <div class="dialog-heading"><div><p class="eyebrow danger-text">DELETE TASK</p><h2 id="delete-title">彻底删除任务</h2></div></div>
+  <div class="dialog-body"><p id="delete-name"></p><p id="delete-counts" class="inline-note"></p><p>任务配置、执行记录、简报正文和候选清单将永久删除，无法在页面恢复。仅保留不含正文的最小防重复处理凭据。</p><p id="delete-legacy" class="muted"></p><label class="check-row"><input type="checkbox" id="delete-reminders"><span>同时取消该任务独有的提醒（默认保留）</span></label><p id="delete-shared" class="muted"></p><p class="muted">已发送的 QQ 消息、AstrBot 群历史、宿主日志及已有备份不受影响。</p><div class="field"><label for="delete-confirmation">输入“彻底删除”确认</label><input id="delete-confirmation" autocomplete="off" placeholder="彻底删除"></div><p id="delete-error" role="alert"></p></div>
+  <div class="dialog-actions"><button id="delete-cancel">取消</button><button id="delete-confirm" class="danger" disabled>确认彻底删除</button></div>
+</dialog>
+<div id="help-tooltip" class="help-tooltip" role="tooltip" hidden></div>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
