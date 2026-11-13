@@ -1,6 +1,6 @@
 name: astrbot_plugin_daily_digest
 display_name: 多群每日简报
 desc: 多任务群消息简报，支持定时私聊投递、回执核对与补发、自然语言选择日程及关联提醒管理。
-version: v0.4.1
+version: v0.4.2
 author: WinterMoonlight
 repo: https://github.com/WinterMoonlight/astrbot_plugin_daily_digest

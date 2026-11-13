@@ -31,6 +31,61 @@ test('native bridge errors retain the host message', async () => {
   await assert.rejects(api('save'), /配置版本冲突/);
 });
 
+test('personal background defaults empty on old tasks and survives form round trips', () => {
+  const defaultsSource = app.match(/^const defaults = .*$/m)[0];
+  const defaults = vm.runInNewContext(defaultsSource + '; defaults');
+  const elements = Object.fromEntries(Object.keys(defaults).map(key => [key, {value: ''}]));
+  const weekdays = Array.from({length: 7}, (_, value) => ({value: String(value), checked: false}));
+  const nodes = {};
+  const source = app.slice(app.indexOf('function readConfig('), app.indexOf('function renderTasks('));
+  const methods = vm.runInNewContext(defaultsSource + '; let selected,selectedRun,page,pollToken=0;' + source + '; ({fill,readConfig})', {
+    form: {elements}, structuredClone,
+    document: {querySelectorAll: selector => selector.includes(':checked') ? weekdays.filter(day => day.checked) : weekdays},
+    $: id => nodes[id] ||= {}, metadata: {models: [], personas: []},
+    options(){}, taskState(){}, renderGroups(){}, renderTasks(){}, tab(){},
+  });
+  const legacy = {...defaults, prompt: '原来的总结要求', persona_id: 'personality'};
+  delete legacy.personal_background;
+  methods.fill({config: legacy});
+  assert.equal(elements.personal_background.value, '');
+  elements.personal_background.value = '学习委员，关注课程安排';
+  const saved = methods.readConfig();
+  assert.equal(saved.personal_background, '学习委员，关注课程安排');
+  assert.equal(saved.prompt, legacy.prompt);
+  assert.equal(saved.persona_id, legacy.persona_id);
+  methods.fill({config: saved});
+  assert.equal(elements.personal_background.value, saved.personal_background);
+  elements.personal_background.value = '';
+  assert.equal(methods.readConfig().personal_background, '');
+  methods.fill({config: legacy});
+  assert.equal(elements.personal_background.value, '');
+});
+
+test('personal background help opens on question mark click and closes with Escape', () => {
+  const html = readFileSync(join(__dirname, '../views/digest/index.html'), 'utf8');
+  const tag = html.match(/<button[^>]*aria-label="个人背景说明"[^>]*>/)[0];
+  assert.ok(tag.includes('type="button"'));
+  const help = tag.match(/data-help="([^"]+)"/)[1];
+  assert.ok(help.includes('可以留空') && help.includes('筛选群消息'));
+  const listeners = {};
+  const tip = {hidden: true, style: {}, contains: () => false,
+    getBoundingClientRect: () => ({width: 280, height: 120})};
+  const button = {dataset: {help}, closest: selector => selector === 'button[data-help]' ? button : null,
+    getBoundingClientRect: () => ({top: 180, bottom: 200, left: 100}),
+    setAttribute(){}, removeAttribute(){}};
+  const doc = {getElementById: () => tip, body: {append(){}}, documentElement: {clientWidth: 800},
+    addEventListener: (event, fn) => listeners[event] = fn, querySelectorAll: () => []};
+  const win = {clearTimeout(){}, setTimeout(){}, addEventListener(){}, innerHeight: 600};
+  const source = readFileSync(join(__dirname, '../views/digest/ui.js'), 'utf8').replace('export function', 'function');
+  const initHelp = vm.runInNewContext(source + '; initHelp');
+  initHelp(doc, win);
+  listeners.click({target: button, preventDefault(){}});
+  assert.equal(tip.hidden, false);
+  assert.equal(tip.textContent, help);
+  listeners.keydown({key: 'Escape', preventDefault(){}, stopPropagation(){}});
+  assert.equal(tip.hidden, true);
+});
+
 test('reply quota loads and saves without the removed time setting', async () => {
   const html = readFileSync(join(__dirname, '../views/digest/index.html'), 'utf8');
   const nodes = {};

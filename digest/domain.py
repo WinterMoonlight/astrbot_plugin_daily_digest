@@ -56,6 +56,7 @@ class TaskConfig:
     lead_minutes: int = 30
     candidate_days: int = 7
     selection_hours: int = 24
+    personal_background: str = ''
 
     @classmethod
     def from_dict(cls, raw: dict):
@@ -72,7 +73,7 @@ class TaskConfig:
         return config
 
     def validate(self, complete=True):
-        for key in ('name', 'provider_id', 'persona_id', 'prompt', 'recipient', 'time', 'timezone'):
+        for key in ('name', 'provider_id', 'persona_id', 'prompt', 'recipient', 'time', 'timezone', 'personal_background'):
             if not isinstance(getattr(self, key), str):
                 raise ValueError(f'{key}必须为文字')
         if self.frequency not in ('daily', 'weekly'):

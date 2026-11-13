@@ -19,6 +19,14 @@ def config(**overrides):
 
 
 class DomainTests(unittest.TestCase):
+    def test_personal_background_is_optional_text(self):
+        self.assertEqual(config().personal_background, '')
+        config(personal_background='').validate()
+        self.assertEqual(config(personal_background='学习委员').to_dict()['personal_background'], '学习委员')
+        for value in (None, 1, [], {}):
+            with self.assertRaises(ValueError):
+                config(personal_background=value)
+
     def test_daily_weekly_defaults_and_independent_lookback(self):
         self.assertEqual(config().lookback_hours, 24)
         self.assertEqual(config(frequency='weekly').lookback_hours, 168)
@@ -74,6 +82,13 @@ class StoreTests(unittest.IsolatedAsyncioTestCase):
         await self.store.save_task(config(name='new'), self.task['id'], 1)
         with self.assertRaises(Conflict):
             await self.store.save_task(config(name='stale'), self.task['id'], 1)
+
+    async def test_personal_background_is_saved_in_run_snapshot_and_can_be_cleared(self):
+        task = await self.store.save_task(config(personal_background='学习委员'))
+        run_id = await self.store.enqueue(task['id'])
+        await self.store.save_task(config(personal_background=''), task['id'], task['version'])
+        self.assertEqual((await self.store.get_run(run_id))['snapshot']['config']['personal_background'], '学习委员')
+        self.assertEqual((await self.store.get_task(task['id']))['config']['personal_background'], '')
 
     async def test_formal_slot_idempotency_and_snapshot(self):
         task = await self.store.set_enabled(self.task['id'], 1, True)

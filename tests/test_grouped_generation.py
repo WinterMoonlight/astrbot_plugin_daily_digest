@@ -56,6 +56,29 @@ def message(group, ident, text='通知', offset=0):
 
 
 class GroupedGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_background_reaches_each_group_and_final_without_leaking_to_other_tasks(self):
+        groups = ['bot:GroupMessage:101', 'bot:GroupMessage:202']
+        history = History([message(g, f'bot/{i}') for i, g in enumerate(groups)])
+        model = Models()
+        generator = Generator(model, history)
+        background = '学习委员，正在参加校内比赛'
+        await generator.run(config(groups=groups, personal_background=background), utcnow(), {'call_budget': 64})
+        self.assertEqual(len(model.calls), 3)
+        for _, _, system in model.calls:
+            self.assertIn(json.dumps({'personal_background': background}, ensure_ascii=False), system)
+            self.assertIn('关注不代表已报名', system)
+        model.calls.clear()
+        await generator.run(config(groups=groups), utcnow(), {'call_budget': 64})
+        self.assertTrue(all(background not in system and '个人背景资料' not in system for _, _, system in model.calls))
+
+    async def test_background_is_included_in_context_budget(self):
+        group = 'bot:GroupMessage:101'
+        model = Models()
+        with self.assertRaisesRegex(ValueError, '上下文不足'):
+            await Generator(model, History([message(group, 'bot/1')])).run(
+                config(groups=[group], personal_background='身份资料' * 3000), utcnow(), {'call_budget': 64})
+        self.assertFalse(model.calls)
+
     async def run_digest(self, messages, names=None, model=None, **settings):
         groups = list(dict.fromkeys(item['group'] for item in messages))
         model = model or Models()

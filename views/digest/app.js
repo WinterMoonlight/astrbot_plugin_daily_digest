@@ -3,7 +3,7 @@ import {initHelp} from './ui.js';
 const $ = (id) => document.getElementById(id);
 const form = $('form');
 const help = initHelp();
-const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
+const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',personal_background:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
 let selected = null, selectedRun = null, tasks = [], metadata = {models:[],personas:[],groups:[]}, page = 1, pollToken = 0;
 let bridge, initialized = false, deletionPreview = null, deleting = false;
 let savedSettings = {};
@@ -33,7 +33,7 @@ function readConfig(){
 }
 function fill(task){
   selected=task;selectedRun=null;page=1;pollToken++;
-  const data=task?.config||structuredClone(defaults);
+  const data={...structuredClone(defaults),...task?.config};
   $('task-title').textContent=task?.config.name||'新建任务';
   for(const key of Object.keys(defaults)){
     if(key==='weekdays')document.querySelectorAll('[name=weekday]').forEach(x=>x.checked=data.weekdays.includes(Number(x.value)));
