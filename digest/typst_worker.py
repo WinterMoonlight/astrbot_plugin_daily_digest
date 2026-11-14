@@ -19,12 +19,15 @@ def render(request, destination):
     files = request['font_files']
     if any(not Path(p).resolve().is_relative_to(root) for p in files):
         raise ValueError('字体超出模板目录')
-    fonts = typst.Fonts(font_paths=files, include_system_fonts=False)
+    # typst-py scans directories on Linux; individual file paths are not portable.
+    directories = sorted({str(Path(p).parent) for p in files})
+    fonts = typst.Fonts(font_paths=directories, include_system_fonts=False)
     families = set(fonts.families())
     roles = request['font_roles']
     # Only scan system fonts when a declared role cannot be served by bundled fonts.
-    if any(role['family'] not in families for role in roles.values()):
-        fonts = typst.Fonts(font_paths=files, include_system_fonts=True)
+    system_fonts_used = any(role['family'] not in families for role in roles.values())
+    if system_fonts_used:
+        fonts = typst.Fonts(font_paths=directories, include_system_fonts=True)
         families = set(fonts.families())
     resolved = {}
     for name, role in roles.items():
@@ -65,7 +68,7 @@ def render(request, destination):
                 peak = round(int(line.split()[1]) / 1024, 2)
     return {'ok': True, 'width': actual_width, 'height': actual_height, 'bytes': len(png),
             'seconds': round(time.perf_counter() - started, 3), 'worker_peak_rss_mib': peak,
-            'fonts': resolved}
+            'fonts': resolved, 'system_fonts_used': system_fonts_used}
 
 
 if __name__ == '__main__':

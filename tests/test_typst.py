@@ -37,6 +37,9 @@ class TypstTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['delivery']['width'], 1080)
             self.assertGreater(result['delivery']['height'], 1000)
             self.assertEqual(result['summary'], report_text(report))
+            if all(Path(path).is_file() for path in self.renderer.catalog.payload(
+                    self.renderer.catalog.load('shorekeeper'), report)['font_files']):
+                self.assertFalse(self.renderer.last_metrics['system_fonts_used'])
         report = {'intro':'超长正文', 'sections':[{'label':'安排','title':'请完整保留','body':'一段长通知。'*3000}]}
         result = await self.render(report)
         self.assertEqual(result['delivery']['format'], 'text')
