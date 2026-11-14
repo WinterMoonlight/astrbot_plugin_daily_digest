@@ -2,33 +2,11 @@
   "$schema": "../template.schema.json",
   "id": "shorekeeper",
   "name": "守岸人 · 蓝白",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "width": 1080,
-  "viewportHeight": 900,
-  "styles": [
-    "tokens.css",
-    "page.css",
-    "background.css",
-    "header.css",
-    "content-panel.css",
-    "card.css",
-    "sticker.css",
-    "character.css",
-    "footer.css"
-  ],
-  "components": [
-    "background",
-    "header",
-    "content-panel",
-    "character",
-    "footer",
-    "card",
-    "sticker"
-  ],
   "assets": {
     "character": "shorekeeper.webp"
   },
-  "characterMime": "image/webp",
   "stickers": {
     "idle": "emotes/0006.png",
     "bin": "emotes/0010.png",
@@ -42,12 +20,6 @@
     "thinking": "emotes/0072.png",
     "thumbs_up": "emotes/0117.png",
     "magic": "emotes/0171.png"
-  },
-  "stickerAliases": {
-    "checklist": "idle",
-    "reading": "coffee",
-    "wave": "thumbs_up",
-    "writing": "magic"
   },
   "stickerCycle": [
     "idle",
@@ -63,35 +35,35 @@
     "hypnotize",
     "bin"
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "fonts": {
     "faces": [
       {
-        "family": "Digest Body",
+        "family": "Microsoft YaHei",
         "weight": 400,
         "file": "assets/fonts/private/msyh.ttf",
         "distribution": "private"
       },
       {
-        "family": "Digest Body",
+        "family": "Microsoft YaHei",
         "weight": 700,
         "file": "assets/fonts/private/msyhbd.ttf",
         "distribution": "private"
       },
       {
-        "family": "Digest Display",
+        "family": "STKaiti",
         "weight": 400,
         "file": "assets/fonts/private/STKAITI.TTF",
         "distribution": "private"
       },
       {
-        "family": "Digest Latin",
+        "family": "Georgia",
         "weight": 400,
         "file": "assets/fonts/private/georgia.ttf",
         "distribution": "private"
       },
       {
-        "family": "Digest Latin",
+        "family": "Georgia",
         "weight": 700,
         "file": "assets/fonts/private/georgiab.ttf",
         "distribution": "private"
@@ -99,38 +71,25 @@
     ],
     "roles": {
       "body": {
-        "family": "Digest Body",
+        "family": "Microsoft YaHei",
         "fallback": [
-          "Microsoft YaHei",
-          "Noto Sans CJK SC",
-          "sans-serif"
+          "Noto Sans CJK SC"
         ]
       },
       "display": {
-        "family": "Digest Display",
+        "family": "STKaiti",
         "fallback": [
-          "STKaiti",
           "KaiTi",
-          "Noto Serif CJK SC",
-          "serif"
+          "Noto Serif CJK SC"
         ]
       },
       "latin": {
-        "family": "Digest Latin",
-        "fallback": [
-          "Georgia",
-          "serif"
-        ]
+        "family": "Georgia",
+        "fallback": []
       }
     }
   },
-  "entry": "template.html",
-  "layout": [
-    "background",
-    "header",
-    "content-panel",
-    "character",
-    "footer"
-  ],
-  "closingCopy": "copy/closings.json"
+  "entry": "typst/report.typ",
+  "closingCopy": "copy/closings.json",
+  "engine": "typst"
 }

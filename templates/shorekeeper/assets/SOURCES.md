@@ -3,7 +3,7 @@
 ## 主立绘
 
 - 当前文件：`shorekeeper.webp`，此前获取并保存在模板内的 Wiki 透明立绘。
-- 页尾通过 HTML/CSS 视窗截取头饰、面部和上半身，透明区域直接显露卡片底色，下缘渐隐。未重新绘制、裁切或覆盖原始图片文件。
+- 页尾通过 Typst 布局视窗截取头饰、面部和上半身，透明区域直接显露卡片底色，下缘渐隐。未重新绘制、裁切或覆盖原始图片文件。
 - 用户提供的 `守岸人图片/7e84ff51e94dc911e8a7823d44dcf72a.png` 副本 `shorekeeper-bottom.png` 保留作备选，当前不加载。
 - 代码许可证不代表第三方角色美术也采用相同许可证。
 
@@ -23,4 +23,4 @@
 - [ATRI 示例](https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis/blob/main/assets/ATRI-demo.webp)
 - [BlueArchive 示例](https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis/blob/main/assets/BlueArchive-demo.webp)
 
-背景、卡片和装饰线条由本目录的 HTML/CSS/SVG 生成。最终预览是浏览器真实截图，不是整页 AI 生成图。
+背景、卡片和装饰线条由本目录的 Typst 布局生成。最终预览是 Typst 编译输出，不是整页 AI 生成图。

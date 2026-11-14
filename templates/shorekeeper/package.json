@@ -3,12 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node tools/build.mjs",
-    "render": "node tools/render.mjs",
-    "render:standard": "node tools/render.mjs samples/standard.json previews/standard",
-    "render:long": "node tools/render.mjs samples/long.json previews/long",
-    "render:extended": "node tools/render.mjs samples/extended.json previews/extended",
     "extract:stickers": "node tools/extract-stickers.mjs"
   },
-  "devDependencies": {"playwright": "1.62.1", "sharp": "0.35.5"}
+  "devDependencies": {
+    "sharp": "0.35.5"
+  }
 }

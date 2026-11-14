@@ -1,4 +1,4 @@
-"""Local, bounded HTML rendering. Templates supply presentation, never message delivery."""
+"""Template discovery and isolated, bounded Typst rendering."""
 from __future__ import annotations
 
 import asyncio
@@ -6,11 +6,10 @@ import base64
 import copy
 import hashlib
 import json
-import math
-import mimetypes
 import os
 import re
-import shutil
+import sys
+import tempfile
 import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,10 +23,6 @@ FILE_NAME = re.compile(r'^[a-f0-9]{32}\.png$')
 
 class RenderError(ValueError):
     pass
-
-
-def safe_json(value):
-    return json.dumps(value, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e')
 
 
 class TemplateCatalog:
@@ -53,23 +48,11 @@ class TemplateCatalog:
             from jsonschema import Draft202012Validator
             schema = json.loads((self.root / 'template.schema.json').read_text(encoding='utf-8'))
             manifest = json.loads((root / 'template.json').read_text(encoding='utf-8'))
-            errors = list(Draft202012Validator(schema).iter_errors(manifest))
-            if errors:
-                raise RenderError('模板清单不符合规范')
-            if manifest['id'] != template_id or not 640 <= manifest['width'] <= 1600:
-                raise RenderError('模板标识或画布宽度无效')
-            components = manifest['components']
-            if not {'header', 'content-panel', 'card'}.issubset(components):
-                raise RenderError('模板缺少必要组件')
-            if not all(re.fullmatch(r'[a-z][a-z0-9_-]*', name) for name in components):
-                raise RenderError('模板组件名称无效')
-            for name in manifest['styles']:
-                self.file(root, 'styles/' + name).read_text(encoding='utf-8')
-            for name in components:
-                self.file(root, 'components/' + name + '.html').read_text(encoding='utf-8')
+            if list(Draft202012Validator(schema).iter_errors(manifest)):
+                raise RenderError('模板清单不符合 Typst 规范')
+            if manifest['id'] != template_id:
+                raise RenderError('模板标识与目录不一致')
             self.file(root, manifest['entry']).read_text(encoding='utf-8')
-            if not {'header', 'content-panel'}.issubset(manifest['layout']) or not set(manifest['layout']).issubset(components):
-                raise RenderError('模板布局缺少必要组件')
             for name in manifest.get('assets', {}).values():
                 if not self.file(root, 'assets/' + name).is_file():
                     raise RenderError('模板图片素材缺失')
@@ -79,17 +62,12 @@ class TemplateCatalog:
                     raise RenderError('模板表情素材缺失')
             if stickers and (not manifest.get('stickerCycle') or any(n not in stickers for n in manifest['stickerCycle'])):
                 raise RenderError('模板表情轮换配置无效')
-            fonts = manifest.get('fonts', {})
-            families = {face['family'] for face in fonts.get('faces', [])}
             warnings = []
-            for face in fonts.get('faces', []):
+            for face in manifest.get('fonts', {}).get('faces', []):
                 if face['distribution'] == 'private' and not face['file'].startswith('assets/fonts/private/'):
                     raise RenderError('私有字体必须放在模板的 private 目录')
                 if not self.file(root, face['file']).is_file():
-                    warnings.append(f"字体缺失：{face['file']}，将使用回退字体")
-            for role in fonts.get('roles', {}).values():
-                if role['family'] not in families or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9 -]*', n) for n in role['fallback']):
-                    raise RenderError('字体角色配置无效')
+                    warnings.append(f"字体缺失：{face['file']}，将尝试回退字体")
             choices = []
             if manifest.get('closingCopy'):
                 choices = json.loads(self.file(root, manifest['closingCopy']).read_text(encoding='utf-8'))
@@ -117,138 +95,73 @@ class TemplateCatalog:
                 warnings.append(f'模板 {directory.name} 不可用，请检查清单、素材与依赖')
         return items, warnings
 
-    def document(self, loaded, data):
+    def payload(self, loaded, data):
         root, manifest = loaded['root'], loaded['manifest']
-        resources = {}
-
-        def asset(relative):
-            path = self.file(root, relative)
-            url = f'https://digest.invalid/resource/{len(resources)}'
-            mime = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
-            resources[url] = (path, mime)
-            return url
-
-        replacements = {name.upper(): asset('assets/' + name_path) for name, name_path in manifest.get('assets', {}).items()}
-        styles = [self.file(root, 'styles/' + name).read_text(encoding='utf-8') for name in manifest['styles']]
-        styles.append(f":root{{--page-width:{manifest['width']}px;}}")
-        fonts = manifest.get('fonts', {})
-        for face in fonts.get('faces', []):
-            if self.file(root, face['file']).is_file():
-                styles.append("@font-face{font-family:'%s';src:url('%s');font-weight:%s;font-style:normal;font-display:block;}" % (face['family'], asset(face['file']), face['weight']))
-        for role, config in fonts.get('roles', {}).items():
-            names = [config['family']] + config['fallback']
-            family = ','.join(n if n in ('serif', 'sans-serif', 'monospace') else "'" + n + "'" for n in names)
-            styles.append(f':root{{--{role}-font:{family};}}')
-        theme = {'layout': manifest['layout'], 'stickers': {}}
-        stickers = manifest.get('stickers', {})
+        data = copy.deepcopy(data)
+        data['assets'] = {key: '/' + 'assets/' + name for key, name in manifest.get('assets', {}).items()}
         cycle = manifest.get('stickerCycle', [])
         for i, item in enumerate(data['sections']):
-            if cycle:
-                name = cycle[i % len(cycle)]
-                item['expression'] = name
-                if name not in theme['stickers']:
-                    theme['stickers'][name] = asset('assets/' + stickers[name])
-        components = []
-        for name in manifest['components']:
-            html = self.file(root, 'components/' + name + '.html').read_text(encoding='utf-8')
-            html = re.sub(r'\{\{([A-Z]+)\}\}', lambda m: replacements[m[1]], html)
-            components.append(f'<template id="component-{name}">{html}</template>')
-        values = {'STYLES': '\n'.join(styles), 'COMPONENTS': '\n'.join(components),
-                  'DATA': safe_json(data), 'THEME': safe_json(theme),
-                  'RUNTIME': (self.root / 'common' / 'layout.js').read_text(encoding='utf-8')}
-        html = self.file(root, manifest['entry']).read_text(encoding='utf-8')
-        html = re.sub(r'\{\{([A-Z]+)\}\}', lambda m: values[m[1]], html)
-        return html, resources
+            item['sticker'] = '/assets/' + manifest['stickers'][cycle[i % len(cycle)]] if cycle else None
+        faces = manifest.get('fonts', {}).get('faces', [])
+        files = [str(self.file(root, face['file'])) for face in faces if self.file(root, face['file']).is_file()]
+        return {'root': str(root), 'entry': manifest['entry'], 'data': data,
+                'font_files': files, 'font_roles': manifest.get('fonts', {}).get('roles', {}),
+                'width': manifest['width'], 'max_height': MAX_HEIGHT, 'max_bytes': MAX_PNG_BYTES}
 
 
 class ImageRenderer:
-    def __init__(self, store, templates, executable=None):
+    def __init__(self, store, templates):
         self.store = store
         self.catalog = TemplateCatalog(templates)
         self.directory = store.path.parent / 'rendered'
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.executable = executable or os.environ.get('DAILY_DIGEST_BROWSER')
         self.lock = asyncio.Lock()
-        self.browser = None
-        self.playwright = None
-
-    async def _browser(self):
-        if self.browser and self.browser.is_connected():
-            return self.browser
-        if not self.playwright:
-            from playwright.async_api import async_playwright
-            self.playwright = await async_playwright().start()
-        executable = self.executable
-        if not executable:
-            for name in ('chromium', 'chromium-browser', 'google-chrome'):
-                executable = shutil.which(name)
-                if executable:
-                    break
-        if not executable and os.name == 'nt':
-            for candidate in ('C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'):
-                if Path(candidate).is_file():
-                    executable = candidate
-                    break
-        self.browser = await self.playwright.chromium.launch(headless=True, executable_path=executable, args=['--disable-dev-shm-usage'])
-        return self.browser
+        self.workers = set()
+        self.last_metrics = None
+        self.worker_timeout = 75
 
     async def close(self):
-        if self.browser:
-            await self.browser.close()
-            self.browser = None
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
+        for process in tuple(self.workers):
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+        await asyncio.gather(*(p.wait() for p in tuple(self.workers)), return_exceptions=True)
 
     async def capture(self, loaded, data):
-        html, resources = await asyncio.to_thread(self.catalog.document, loaded, data)
-        browser = await self._browser()
-        context = await browser.new_context(viewport={'width': loaded['manifest']['width'], 'height': 900}, device_scale_factor=1, service_workers='block')
-        failed_resources = []
-        try:
-            async def route(request):
-                found = resources.get(request.request.url)
-                if not found:
-                    await request.abort()
-                    return
-                file, mime = found
+        payload = self.catalog.payload(loaded, data)
+        # A fresh process returns all native compiler memory on exit.
+        with tempfile.TemporaryDirectory(prefix='.typst-', dir=self.directory) as job:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, str(Path(__file__).with_name('typst_worker.py')), job,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                **({'creationflags': 0x08000000} if os.name == 'nt' else {}))
+            self.workers.add(process)
+            communication = asyncio.create_task(process.communicate(json.dumps(payload, ensure_ascii=False).encode('utf-8')))
+            try:
                 try:
-                    body = await asyncio.to_thread(file.read_bytes)
-                    await request.fulfill(body=body, content_type=mime, headers={'Access-Control-Allow-Origin': '*'})
-                except OSError:
-                    failed_resources.append(file.name)
-                    await request.abort()
-            await context.route('**/*', route)
-            page = await context.new_page()
-            await page.set_content(html, wait_until='load', timeout=30000)
-            await page.wait_for_function('window.__RENDER_READY__ || window.__RENDER_ERROR__', timeout=30000)
-            metrics = await page.evaluate('''() => {
-                const canvas = document.querySelector('.report-page');
-                const rect = canvas.getBoundingClientRect();
-                const visible = [...document.querySelectorAll('.card-body')].every(node => {
-                  if(node.scrollHeight>node.clientHeight+1 || node.scrollWidth>node.clientWidth+1) return false;
-                  const range=document.createRange(); range.selectNodeContents(node);
-                  const lines=[...range.getClientRects()];
-                  return lines.some(r=>r.width>0) && lines.every(r=>r.left>=rect.left-1 && r.right<=rect.right+1 && r.top>=rect.top && r.bottom<=rect.bottom+1);
-                });
-                return {error:window.__RENDER_ERROR__, width:rect.width, height:rect.height,
-                  overflow:document.documentElement.scrollWidth>rect.width,
-                  visible, fontError:[...document.fonts].some(f=>f.status==='error'),
-                  text:[...document.querySelectorAll('.card-body')].map(n=>n.textContent),
-                  images:[...document.images].every(i=>i.complete&&i.naturalWidth>0)};
-            }''')
-            if metrics['error'] or metrics['overflow'] or not metrics['images'] or not metrics['visible'] or metrics['fontError'] or failed_resources:
-                raise RenderError('模板排版或资源加载失败')
-            if metrics['text'] != [s['body'] for s in data['sections']]:
-                raise RenderError('模板没有完整呈现所有正文')
-            if not 1 <= metrics['height'] <= MAX_HEIGHT:
-                raise RenderError(f'图片超过 {MAX_HEIGHT} 像素高度限制')
-            png = await page.locator('.report-page').screenshot(type='png', timeout=30000)
-            if len(png) > MAX_PNG_BYTES:
-                raise RenderError('图片超过 8 MiB 大小限制')
-            return png, {'width': int(metrics['width']), 'height': math.ceil(metrics['height'])}
-        finally:
-            await context.close()
+                    async with asyncio.timeout(self.worker_timeout):
+                        stdout, _ = await asyncio.shield(communication)
+                except BaseException as exc:
+                    if process.returncode is None:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                    await asyncio.shield(asyncio.gather(communication, return_exceptions=True))
+                    if isinstance(exc, TimeoutError):
+                        raise RenderError('Typst 编译超时，已停止子进程') from exc
+                    raise
+                result = json.loads(stdout)
+                if process.returncode or not result.get('ok'):
+                    raise RenderError(result.get('error', 'Typst 编译失败'))
+                png = await asyncio.to_thread((Path(job) / 'report.png').read_bytes)
+                self.last_metrics = result
+                return png, {'width': result['width'], 'height': result['height']}
+            finally:
+                self.workers.discard(process)
 
     async def present(self, run, task, result):
         result['delivery'] = {'format': 'text', 'requested': task.output_mode}
@@ -281,7 +194,7 @@ class ImageRenderer:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            reason = str(exc) if isinstance(exc, RenderError) else '本地图片渲染不可用，请检查浏览器和渲染依赖'
+            reason = str(exc) if isinstance(exc, RenderError) else '本地 Typst 渲染不可用，请检查模板及依赖'
             result['delivery']['reason'] = reason
             result.setdefault('warnings', []).append(reason + '；已回退文字，内容未截断')
         return result

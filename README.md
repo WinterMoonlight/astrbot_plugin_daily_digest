@@ -4,7 +4,7 @@
 
 **把群聊里的重要通知整理成文字或图片，再把你选中的日程加入 AstrBot「未来任务」。**
 
-[![Version](https://img.shields.io/badge/version-v0.5.0-blue)](metadata.yaml)
+[![Version](https://img.shields.io/badge/version-v0.5.1-blue)](metadata.yaml)
 [![AstrBot](https://img.shields.io/badge/AstrBot-plugin-purple)](https://github.com/AstrBotDevs/AstrBot)
 [![Platform](https://img.shields.io/badge/QQ-OneBot%20v11-green)](#使用前准备)
 [![License](https://img.shields.io/badge/code-MIT-blue)](LICENSE)
@@ -17,7 +17,7 @@
 
 插件读取 **AstrBot 已保存的群历史**，先按群整理，再汇总重要内容。简报发送到 QQ 私聊；如果有可添加的日程，会另发一条文字清单，由收件人选择是否创建提醒。
 
-> 当前源码版本为 **v0.5.0**。图片功能已完成本地回归与浏览器渲染验证，真实服务器和 QQ 图片投递仍待部署后验收。已有任务默认保持文字输出。
+> 当前源码版本为 **v0.5.1**。图片功能已完成本地回归与 Typst 渲染验证，真实服务器和 QQ 图片投递仍待部署后验收。已有任务默认保持文字输出。
 
 ## 功能概览
 
@@ -47,7 +47,7 @@
 - **群历史**：AstrBot 已开启并保留群历史。使用消息白名单时，所选群需要允许记录。
 - **总结模型**：AstrBot 中已配置聊天模型及有效的上下文上限。
 - **原生提醒**：使用日程功能时，收件人会话的原生模型与消息工具应能执行 AstrBot「未来任务」。
-- **图片环境**：选择图片输出时，还需在运行 AstrBot 的设备或容器中准备浏览器和中文字体，见[图片简报与字体](#图片简报与字体)。
+- **图片环境**：选择图片输出时，还需在运行 AstrBot 的设备或容器中准备 Typst 和模板字体，见[图片简报与字体](#图片简报与字体)。
 
 当前支持 **QQ 群作为消息来源、QQ 私聊作为收件人**。尚不支持向群内直接推送，也未适配其他聊天平台。
 
@@ -112,17 +112,17 @@ v0.5.0 使用 **数据库版本 5**，新增图片投递类型和收尾短句记
 
 模板与人格分别选择：**人格控制正文表达，模板控制外观和固定装饰文案**。守岸人模板的 10 组收尾寄语按“大字＋小字”成组轮换；预览与正式计划分别记录，同一次执行及补发使用已经选定的组合。
 
-### 准备浏览器
+### 准备 Typst
 
-以下命令在运行 AstrBot 的环境中执行。Docker 部署应在 AstrBot 容器内操作，而不是仅在宿主机安装。
+正式图片渲染使用 Typst，不依赖 Chromium、Playwright 或外部截图服务。在运行 AstrBot 的 Python 环境中安装根目录依赖即可：
 
 ```sh
-python -m playwright install --with-deps chromium
+python -m pip install -r requirements.txt
 ```
 
-插件也会尝试使用已安装的 Chromium，或 Windows 上的 Chrome／Edge。需要指定浏览器时，可设置环境变量 `DAILY_DIGEST_BROWSER` 为可执行文件路径。插件不会自行下载浏览器。
+Docker 部署需在 AstrBot 容器内操作。渲染采用独立子进程，每次生成完成后退出并释放编译器内存；同时只生成一张图。文字模式不会启动 Typst 子进程。
 
-这里的“本地渲染”指 **在运行 AstrBot 的设备上渲染**：AstrBot 在服务器运行，图片就在服务器生成。群消息不会为截图而上传到外部渲染服务。
+这里的“本地渲染”指在运行 AstrBot 的设备上生成图片。AstrBot 在服务器运行，图片就在服务器生成，截图过程不向外部服务提交群消息。
 
 ### 模板字体
 
@@ -138,9 +138,9 @@ templates/shorekeeper/assets/fonts/private/
 
 ### 长图和失败处理
 
-正文越多，图片越长；当前一次输出一张 PNG，不自动分页。当前限制为 **12000px 高、8 MiB**，渲染单并发，单次渲染预算为 **90 秒**。
+正文越多，图片越长；当前一次输出一张 PNG，不自动分页。当前限制为 **12000px 高、8 MiB**，渲染单并发，单次渲染整体预算为 **90 秒**，其中独立编译进程最多运行 75 秒，超时会终止并回收。
 
-- 模板失效、缺少浏览器、渲染出错或超过尺寸限制时，回退完整文字，并在执行记录说明原因。
+- 模板失效、缺少 Typst 依赖、渲染出错或超过尺寸限制时，回退完整文字，并在执行记录说明原因。
 - 图片已经进入发送流程后，发送失败按原有补发机制处理；**结果未知时不会自动再发一份文字**，避免重复打扰。
 - 补发复用缓存原图；缓存缺失或校验失败会阻止发送，不会悄悄换成另一张图。
 
@@ -291,7 +291,7 @@ flowchart TD
 <details>
 <summary>选了图片却收到文字，或者字体与示例不同？</summary>
 
-查看执行记录中的回退原因和字体警告。常见原因是 AstrBot 容器未安装浏览器、模板缺失、资源加载失败或图片超限。字体缺失会按回退链替换，并不一定导致文字回退。应在实际运行 AstrBot 的环境里检查，而不只看电脑上的预览。
+查看执行记录中的回退原因和字体警告。常见原因是 AstrBot 容器未安装 Typst、模板缺失、资源加载失败或图片超限。字体缺失会按回退链替换，并不一定导致文字回退。应在实际运行 AstrBot 的环境里检查，而不只看电脑上的预览。
 
 </details>
 
@@ -325,15 +325,15 @@ flowchart TD
 
 所选群在对应范围内的消息、群标识、个人背景、人格和总结要求会交给配置的模型。日程解析携带当前回复、关联事项与必要追问上下文；结果回执也可能调用模型调整表达。
 
-图片模式使用本地 HTML 模板排版，不调用 AI 绘图。当前不执行群消息图片 OCR、附件解析或外部日历同步。
+图片模式使用本地 Typst 模板排版，不调用 AI 绘图。当前不执行群消息图片 OCR、附件解析或外部日历同步。
 
 </details>
 
 ## 模板与开发
 
-新增模板、字段约定、字体分发及排版检查见 [模板规范 v1](docs/template-spec.md)。守岸人示例与素材说明见 [模板 README](templates/shorekeeper/README.md)。
+新增模板、字段约定、字体分发及排版检查见 [模板规范 v2](docs/template-spec.md)。守岸人示例与素材说明见 [模板 README](templates/shorekeeper/README.md)。
 
-在插件根目录安装依赖、准备浏览器后，可用正式渲染器生成本地样图：
+在插件根目录安装依赖并准备字体后，可用正式渲染器生成本地样图：
 
 ```sh
 python tools/preview_template.py --template shorekeeper --sample templates/shorekeeper/samples/standard.json
@@ -363,18 +363,7 @@ python -m unittest discover -s tests -p 'test_*.py' -q
 node --test tests/test_view_bridge.cjs
 ```
 
-真实浏览器用例默认跳过。准备浏览器后，在当前终端设置 `DIGEST_BROWSER_TESTS=1` 再运行 Python 回归，例如 PowerShell：
-
-```powershell
-$env:DIGEST_BROWSER_TESTS='1'
-python -m unittest discover -s tests -p 'test_*.py' -q
-```
-
-Linux／macOS shell：
-
-```sh
-DIGEST_BROWSER_TESTS=1 python -m unittest discover -s tests -p 'test_*.py' -q
-```
+Typst 渲染测试包含在上述 Python 回归中，覆盖长短内容、最小模板、超时退出和进程回收，无需浏览器。
 
 前端图片流程使用 `tests/preview_server.py` 的本地模拟页面及 `tests/ui_images.cjs`，需要可用的 Node Playwright 环境。AstrBot 宿主隔离检查见 `tests/native_probe.py`，需另行准备 AstrBot 环境，不能替代真实 QQ 验收。
 
@@ -384,16 +373,17 @@ DIGEST_BROWSER_TESTS=1 python -m unittest discover -s tests -p 'test_*.py' -q
 
 | 版本 | 主要变化 |
 | --- | --- |
-| **v0.5.0** | 文字／图片选择、守岸人模板、图片预览与下载、模板规范、字体目录和收尾轮换；数据库版本 5 |
+| **v0.5.1** | 正式渲染改用 Typst 独立子进程，移除浏览器依赖；模板规范版本 2 |
+| v0.5.0 | 文字／图片选择、守岸人模板、图片预览与下载、模板规范、字体目录和收尾轮换；数据库版本 5 |
 | v0.4.2 | 可选个人背景独立设置，不改写旧总结提示词 |
 | v0.4.1 | 自动识别改为仅按条数；调整人格表达、清单标题、条件说明和覆盖信息展示 |
 | v0.4.0 | 按群总结、原生任务查重、统一人格及分区管理页 |
 
-**本地验证记录（2026-11-14）：**v0.5.0 已通过 **185 项 Python 测试**，包含真实浏览器渲染、第二套最小模板、图片投递状态、旧流程兼容和数据库升级；图片管理页模拟流程及独立短句轮换测试也已通过。
+**本地验证记录（2026-11-14）：**v0.5.1 已通过 **187 项 Python 测试**，包含Typst 原生渲染、第二套最小模板、图片投递状态、旧流程兼容和数据库升级；图片管理页模拟流程及独立短句轮换测试也已通过。
 
 既有文字功能曾在 **AstrBot 4.29.4、Python 3.12.16、Ubuntu 24.04、Docker、NapCat** 环境验证。这是测试环境记录，不是最低版本承诺。
 
-**仍待实机验收：**本次图片功能在服务器上的浏览器与字体部署、真实 QQ 图片发送，以及与日程选择、补发和重启组合的完整流程。本地模拟或原生任务列表状态不能单独证明 QQ 已收到消息。
+**仍待实机验收：**本次图片功能在服务器上的 Typst 与字体部署、真实 QQ 图片发送，以及与日程选择、补发和重启组合的完整流程。本地模拟或原生任务列表状态不能单独证明 QQ 已收到消息。
 
 反馈问题请到 [Issues](https://github.com/WinterMoonlight/astrbot_plugin_daily_digest/issues)，附上插件和 AstrBot 版本、复现步骤、预期与实际表现，以及去除凭据和私人消息后的必要日志。
 

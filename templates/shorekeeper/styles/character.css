@@ -1,8 +1,0 @@
-.character-layer { position:relative; flex:none; display:grid; grid-template-columns:300px minmax(0,1fr); gap:22px; align-items:center; margin:24px 36px 0; padding:0 38px 0 0; min-height:236px; overflow:hidden; z-index:1; border:1px dashed #bcd5e7; border-radius:24px; background:linear-gradient(110deg,#f1f8fde8,#f7faffd9); }
-.character-portrait { position:relative; height:234px; overflow:hidden; mask-image:linear-gradient(#000 82%,transparent 100%); }
-.main-character { position:absolute; display:block; width:450px; max-width:none; height:auto; left:-130px; top:-16px; }
-.character-caption { position:relative; min-width:0; padding:24px 0; }
-.closing-title { margin:0 0 14px; font-family:var(--display-font); font-size:32px; font-weight:400; line-height:1.4; letter-spacing:1px; color:#557a9a; }
-.closing-note { margin:0; font-size:21px; line-height:1.6; color:#7e95aa; overflow-wrap:anywhere; }
-.closing-signature { display:block; margin-top:14px; font-family:var(--display-font); font-size:20px; color:#91a5b7; }
-.closing-spark { position:absolute; top:18px; right:24px; font-size:23px; color:#a8c6dc; }

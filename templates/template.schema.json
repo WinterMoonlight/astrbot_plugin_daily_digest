@@ -1,25 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Daily digest template manifest v1",
+  "title": "Daily digest Typst template manifest v2",
   "type": "object",
   "required": [
     "schemaVersion",
+    "engine",
     "id",
     "name",
     "version",
     "width",
-    "viewportHeight",
-    "styles",
-    "components",
-    "entry",
-    "layout"
+    "entry"
   ],
   "properties": {
     "$schema": {
       "type": "string"
     },
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "id": {
       "type": "string",
@@ -35,25 +32,8 @@
     },
     "width": {
       "type": "integer",
-      "minimum": 1
-    },
-    "viewportHeight": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "styles": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "uniqueItems": true
-    },
-    "components": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "uniqueItems": true
+      "minimum": 640,
+      "maximum": 1600
     },
     "assets": {
       "type": "object",
@@ -61,16 +41,7 @@
         "type": "string"
       }
     },
-    "characterMime": {
-      "type": "string"
-    },
     "stickers": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "stickerAliases": {
       "type": "object",
       "additionalProperties": {
         "type": "string"
@@ -143,19 +114,14 @@
     },
     "entry": {
       "type": "string",
-      "minLength": 1
-    },
-    "layout": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 2,
-      "uniqueItems": true
+      "pattern": "^(?!.*\\.\\.)(?!.*\\\\).+\\.typ$"
     },
     "closingCopy": {
       "type": "string",
       "minLength": 1
+    },
+    "engine": {
+      "const": "typst"
     }
   },
   "additionalProperties": false,

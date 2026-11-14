@@ -1,5 +1,6 @@
-"""Opt-in real browser tests: DIGEST_BROWSER_TESTS=1 python -m unittest discover -s tests."""
+"""Real Typst worker tests: no browser or network is needed."""
 import json
+import asyncio
 import os
 import shutil
 import unittest
@@ -13,8 +14,7 @@ import test_images as fixtures
 TEMPLATES = fixtures.TEMPLATES
 
 
-@unittest.skipUnless(os.environ.get('DIGEST_BROWSER_TESTS') == '1', 'real browser tests are opt-in')
-class BrowserTests(unittest.IsolatedAsyncioTestCase):
+class TypstTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # Reuse only setup, not the fixture-renderer tests themselves.
         await fixtures.ImageWorkflowTests.asyncSetUp(self)
@@ -46,24 +46,35 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
     async def test_second_template_without_character_fonts_or_stickers(self):
         templates = Path(self.tmp.name) / 'templates'
         root = templates / 'minimal'
-        (root / 'components').mkdir(parents=True)
-        (root / 'styles').mkdir()
-        (templates / 'common').mkdir()
+        root.mkdir(parents=True)
         shutil.copyfile(TEMPLATES / 'template.schema.json', templates / 'template.schema.json')
-        shutil.copyfile(TEMPLATES / 'common/layout.js', templates / 'common/layout.js')
-        shutil.copyfile(TEMPLATES / 'shorekeeper/template.html', root / 'template.html')
-        manifest = {'schemaVersion':1,'id':'minimal','name':'Minimal','version':'1.0.0','width':800,'viewportHeight':900,
-            'entry':'template.html','layout':['header','content-panel'],'styles':['page.css'], 'components':['header','content-panel','card']}
+        manifest = {'schemaVersion':2, 'engine':'typst', 'id':'minimal','name':'Minimal','version':'1.0.0','width':800,
+            'entry':'report.typ'}
         (root / 'template.json').write_text(json.dumps(manifest),encoding='utf-8')
-        (root / 'components/header.html').write_text('<header><h1 data-field="report-title"></h1><p data-field="intro"></p></header>',encoding='utf-8')
-        (root / 'components/content-panel.html').write_text('<section class="card-stack"></section>',encoding='utf-8')
-        (root / 'components/card.html').write_text('<article><h2 data-field="title"></h2><p class="card-body" data-field="body"></p></article>',encoding='utf-8')
-        (root / 'styles/page.css').write_text('body{margin:0} .report-page{width:800px} .card-body{white-space:pre-wrap;overflow-wrap:anywhere}',encoding='utf-8')
+        (root / 'report.typ').write_text('#let data = json(bytes(sys.inputs.data))\n#set page(width:400pt,height:auto,margin:10pt)\n#for item in data.sections { text(item.body) }',encoding='utf-8')
         self.renderer.catalog = TemplateCatalog(templates)
-        report = {'intro':'另一种模板','sections':[{'label':'提示','title':'标题','body':'<script>alert(1)</script> 作为普通文字显示。'}]}
+        report = {'intro':'另一种模板','sections':[{'label':'提示','title':'标题','body':'<script>alert(1)</script> #panic(42) is literal text.'}]}
         cfg = TaskConfig.from_dict({**self.task['config'],'template_id':'minimal'})
         result = await self.render(report, cfg)
         self.assertEqual(result['delivery']['format'], 'image', result['warnings'])
         self.assertEqual(result['delivery']['template_id'], 'minimal')
         self.assertIsNone(result['delivery']['closing'])
         self.assertEqual(result['delivery']['width'], 800)
+
+    async def test_worker_exits_after_render_and_next_render_works(self):
+        report = {'intro':'测试', 'sections':[{'label':'事项','title':'休息一下','body':'正文保持完整。'}]}
+        for _ in range(2):
+            result = await self.render(report)
+            self.assertEqual(result['delivery']['format'], 'image', result['warnings'])
+            self.assertFalse(self.renderer.workers)
+            self.assertFalse(list(self.renderer.directory.glob('.typst-*')))
+
+    async def test_timeout_reaps_worker_and_preserves_text(self):
+        self.renderer.worker_timeout = 0.001
+        report = {'intro':'测试', 'sections':[{'label':'事项','title':'超时','body':'正文不会丢失。'}]}
+        result = await self.render(report)
+        self.assertEqual(result['delivery']['format'], 'text')
+        self.assertIn('超时', result['delivery']['reason'])
+        self.assertEqual(result['summary'], report_text(report))
+        self.assertFalse(self.renderer.workers)
+        self.assertFalse(list(self.renderer.directory.glob('.typst-*')))

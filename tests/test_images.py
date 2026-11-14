@@ -55,11 +55,10 @@ class ImageDomainTests(unittest.TestCase):
         loaded = catalog.load('shorekeeper')
         data = {**checked_report(REPORT, {'bot/1'}), 'title': '日常简报', 'date': '2026.11.14', 'closing': loaded['choices'][0]}
         data['sections'][0]['body'] = '</script><script>alert(1)</script>'
-        html, resources = catalog.document(loaded, data)
-        self.assertNotIn('</script><script>alert(1)</script>', html)
-        self.assertTrue(resources)
-        self.assertNotIn('file://', html)
-        self.assertTrue(all(p.is_relative_to(TEMPLATES / 'shorekeeper') for p, _ in resources.values()))
+        payload = catalog.payload(loaded, data)
+        self.assertEqual(payload['data']['sections'][0]['body'], '</script><script>alert(1)</script>')
+        self.assertTrue(payload['font_files'])
+        self.assertTrue(all(Path(p).is_relative_to(TEMPLATES / 'shorekeeper') for p in payload['font_files']))
 
 
 class ImageGenerationTests(unittest.IsolatedAsyncioTestCase):
