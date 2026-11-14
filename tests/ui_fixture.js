@@ -8,7 +8,7 @@
     window.fixtureActions.push(payload.action);let data;
     switch(payload.action){
       case 'list':data={tasks,settings};break;
-      case 'metadata':data={models:[{id:'fixture',model:'offline'}],personas:[{id:'default'}],groups:[{umo:'test:GroupMessage:123',name:'测试源群',id:'123'}],warnings:[]};break;
+      case 'metadata':data={templates:[{id:'shorekeeper',name:'守岸人 · 蓝白',version:'1.0.0',warnings:[]}],models:[{id:'fixture',model:'offline'}],personas:[{id:'default'}],groups:[{umo:'test:GroupMessage:123',name:'测试源群',id:'123'}],warnings:[]};break;
       case 'save':{
         const old=tasks.find(t=>t.id===payload.id);
         data={id:old?.id||'task1',version:(old?.version||0)+1,config:payload.config,enabled:old?.enabled||false,archived:false};
@@ -20,8 +20,9 @@
       case 'delete':if(payload.confirmation!=='彻底删除'||payload.token!=='fixture-token')throw new Error('删除确认无效');tasks=tasks.filter(t=>t.id!==payload.id);runs={};data={deleted:true};break;
       case 'enable':data=tasks.find(t=>t.id===payload.id);data.enabled=payload.enabled;data.version++;runs.formal1={id:'formal1',task_id:data.id,kind:'scheduled',status:'unknown',snapshot:{planned_at:new Date().toISOString()},created_at:new Date().toISOString(),result:{summary:'第一段已发送\n第二段结果未知',candidates:[]}};break;
       case 'preview':{
-        data={id:'preview1'};runs.preview1={id:'preview1',kind:'preview',status:'ready',created_at:new Date().toISOString(),result:{summary:'重要通知\n今天 15:00 课程说明会。\n\n<img src=x onerror=alert(1)>\n\n[覆盖说明] 测试源群：覆盖完整性未知',candidates:[],coverage:[{group:'test:GroupMessage:123',count:80,note:'覆盖未知'}],logical_calls:1}};break;
+        data={id:'preview1'};runs.preview1={id:'preview1',kind:'preview',status:'ready',created_at:new Date().toISOString(),result:{summary:'重要通知\n今天 15:00 课程说明会。\n\n<img src=x onerror=alert(1)>\n\n[覆盖说明] 测试源群：覆盖完整性未知',candidates:[],coverage:[{group:'test:GroupMessage:123',count:80,note:'覆盖未知'}],logical_calls:1}};if(tasks.find(t=>t.id===payload.id)?.config.output_mode==='image')runs.preview1.result.delivery={format:'image',requested:'image',width:1080,height:1916};break;
       }
+      case 'image':if(window.fixtureImageFailure)throw new Error('模拟图片读取失败');data={src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='};break;
       case 'run':data=runs[payload.id];break;
       case 'runs':data=Object.values(runs);break;
       case 'delivery':data={run:runs[payload.id],parts};break;

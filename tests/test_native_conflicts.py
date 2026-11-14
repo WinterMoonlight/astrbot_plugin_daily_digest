@@ -82,9 +82,9 @@ class ConflictTests(unittest.IsolatedAsyncioTestCase):
         await self.store.call(lambda db: db.execute('DELETE FROM schema_version WHERE version>=3'))
         await self.store.initialize()
         version = await self.store.call(lambda db: db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0])
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
         self.assertEqual((await self.store.get_task(self.task['id']))['id'], self.task['id'])
-        await self.store.call(lambda db: db.execute('INSERT INTO schema_version VALUES (5)'))
+        await self.store.call(lambda db: db.execute('INSERT INTO schema_version VALUES (6)'))
         with self.assertRaisesRegex(RuntimeError, '拒绝降级'):
             await self.store.initialize()
 

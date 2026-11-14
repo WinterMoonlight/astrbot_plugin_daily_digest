@@ -1,0 +1,136 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "shorekeeper",
+  "name": "守岸人 · 蓝白",
+  "version": "1.0.0",
+  "width": 1080,
+  "viewportHeight": 900,
+  "styles": [
+    "tokens.css",
+    "page.css",
+    "background.css",
+    "header.css",
+    "content-panel.css",
+    "card.css",
+    "sticker.css",
+    "character.css",
+    "footer.css"
+  ],
+  "components": [
+    "background",
+    "header",
+    "content-panel",
+    "character",
+    "footer",
+    "card",
+    "sticker"
+  ],
+  "assets": {
+    "character": "shorekeeper.webp"
+  },
+  "characterMime": "image/webp",
+  "stickers": {
+    "idle": "emotes/0006.png",
+    "bin": "emotes/0010.png",
+    "hypnotize": "emotes/0018.png",
+    "coffee": "emotes/0029.png",
+    "watermelon": "emotes/0035.png",
+    "drink": "emotes/0043.png",
+    "sunglasses": "emotes/0049.png",
+    "shy": "emotes/0058.png",
+    "sleepy": "emotes/0062.png",
+    "thinking": "emotes/0072.png",
+    "thumbs_up": "emotes/0117.png",
+    "magic": "emotes/0171.png"
+  },
+  "stickerAliases": {
+    "checklist": "idle",
+    "reading": "coffee",
+    "wave": "thumbs_up",
+    "writing": "magic"
+  },
+  "stickerCycle": [
+    "idle",
+    "coffee",
+    "thumbs_up",
+    "magic",
+    "thinking",
+    "drink",
+    "shy",
+    "sunglasses",
+    "watermelon",
+    "sleepy",
+    "hypnotize",
+    "bin"
+  ],
+  "schemaVersion": 1,
+  "fonts": {
+    "faces": [
+      {
+        "family": "Digest Body",
+        "weight": 400,
+        "file": "assets/fonts/private/msyh.ttf",
+        "distribution": "private"
+      },
+      {
+        "family": "Digest Body",
+        "weight": 700,
+        "file": "assets/fonts/private/msyhbd.ttf",
+        "distribution": "private"
+      },
+      {
+        "family": "Digest Display",
+        "weight": 400,
+        "file": "assets/fonts/private/STKAITI.TTF",
+        "distribution": "private"
+      },
+      {
+        "family": "Digest Latin",
+        "weight": 400,
+        "file": "assets/fonts/private/georgia.ttf",
+        "distribution": "private"
+      },
+      {
+        "family": "Digest Latin",
+        "weight": 700,
+        "file": "assets/fonts/private/georgiab.ttf",
+        "distribution": "private"
+      }
+    ],
+    "roles": {
+      "body": {
+        "family": "Digest Body",
+        "fallback": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "sans-serif"
+        ]
+      },
+      "display": {
+        "family": "Digest Display",
+        "fallback": [
+          "STKaiti",
+          "KaiTi",
+          "Noto Serif CJK SC",
+          "serif"
+        ]
+      },
+      "latin": {
+        "family": "Digest Latin",
+        "fallback": [
+          "Georgia",
+          "serif"
+        ]
+      }
+    }
+  },
+  "entry": "template.html",
+  "layout": [
+    "background",
+    "header",
+    "content-panel",
+    "character",
+    "footer"
+  ],
+  "closingCopy": "copy/closings.json"
+}

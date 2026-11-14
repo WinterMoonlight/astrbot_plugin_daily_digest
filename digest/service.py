@@ -1,15 +1,13 @@
-"""Task administration and bounded preview workers.
-
-Formal delivery is deliberately not enabled by this development milestone.
-"""
+"""Task administration, bounded generation and optional local image rendering."""
 import asyncio
 
 from .domain import TaskConfig, parse_time, utcnow
 
 
 class Service:
-    def __init__(self, store, generator):
+    def __init__(self, store, generator, renderer=None):
         self.store, self.generator = store, generator
+        self.renderer = renderer
         self.active = {}
         self.wake = asyncio.Event()
         self.stopping = False
@@ -19,6 +17,8 @@ class Service:
     async def start(self):
         await self.store.initialize()
         await self.store.cleanup((await self.store.settings())['retention_days'])
+        if self.renderer:
+            await self.renderer.cleanup()
         self.pump_task = asyncio.create_task(self.pump(), name='digest-preview-queue')
 
     async def stop(self):
@@ -30,6 +30,8 @@ class Service:
         for job in jobs:
             job.cancel()
         await asyncio.gather(*jobs, return_exceptions=True)
+        if self.renderer:
+            await self.renderer.close()
 
     async def preview(self, task_id):
         task = await self.store.get_task(task_id)
@@ -64,6 +66,8 @@ class Service:
         return result
 
     async def save(self, config, task_id=None, version=None):
+        if config.output_mode == 'image' and self.renderer:
+            await asyncio.to_thread(self.renderer.catalog.load, config.template_id)
         if task_id and (await self.store.get_task(task_id))['enabled']:
             await self.generator.models.prepare(config)
         return await self.store.save_task(config,task_id,version)
@@ -80,6 +84,8 @@ class Service:
             planned = parse_time(run['snapshot']['planned_at'])
             async with asyncio.timeout(settings['generation_timeout']):
                 result = await self.generator.run(task, planned, settings)
+                if self.renderer:
+                    result = await self.renderer.present(run, task, result)
             current = await self.store.get_task(run['task_id'])
             if current['archived']:
                 await self.store.finish(run['id'], 'cancelled')
@@ -109,6 +115,8 @@ class Service:
             settings = await self.store.settings()
             if asyncio.get_running_loop().time() - last_cleanup >= 3600:
                 await self.store.cleanup(settings['retention_days'])
+                if self.renderer:
+                    await self.renderer.cleanup()
                 last_cleanup = asyncio.get_running_loop().time()
             while not self.stopping and len(self.active) < settings['concurrency']:
                 run = await self.store.claim(set(self.active))

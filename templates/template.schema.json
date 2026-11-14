@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Daily digest template manifest v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "width",
+    "viewportHeight",
+    "styles",
+    "components",
+    "entry",
+    "layout"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "viewportHeight": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "styles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "characterMime": {
+      "type": "string"
+    },
+    "stickers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "stickerAliases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "stickerCycle": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fonts": {
+      "type": "object",
+      "required": [
+        "faces",
+        "roles"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "faces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "family",
+              "weight",
+              "file",
+              "distribution"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9 -]*$"
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 900
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^assets/fonts/(?!.*\\.\\.)(?!.*\\\\).+\\.(ttf|TTF|otf|OTF|woff|woff2)$"
+              },
+              "distribution": {
+                "enum": [
+                  "private",
+                  "bundled"
+                ]
+              }
+            }
+          }
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/fontRole"
+            },
+            "display": {
+              "$ref": "#/$defs/fontRole"
+            },
+            "latin": {
+              "$ref": "#/$defs/fontRole"
+            }
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layout": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2,
+      "uniqueItems": true
+    },
+    "closingCopy": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "fontRole": {
+      "type": "object",
+      "required": [
+        "family",
+        "fallback"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "fallback": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

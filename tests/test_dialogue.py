@@ -316,7 +316,7 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
             samples.append(record)
         settings = await self.store.settings({'reply_message_limit': 7})
         def old_schema(db):
-            db.execute('DELETE FROM schema_version WHERE version=4')
+            db.execute('DELETE FROM schema_version WHERE version>=4')
             db.execute('UPDATE settings SET data=?', (json.dumps({**settings, 'reply_window_minutes': 5}),))
             for record in samples:
                 put(db, 'dialogue', record)
@@ -327,7 +327,7 @@ class DialogueTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(after, {k: v for k, v in before.items() if k not in ('window_minutes', 'expires_at')})
         self.assertEqual(await self.store.settings(), settings)
         self.assertEqual(await self.store.call(lambda db: entity(db, 'list', ident)), saved_list)
-        self.assertEqual(await self.store.call(lambda db: db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]), 4)
+        self.assertEqual(await self.store.call(lambda db: db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]), 5)
 
     async def test_restart_keeps_history_delivery_time_and_remaining_quota(self):
         await self.active_list()

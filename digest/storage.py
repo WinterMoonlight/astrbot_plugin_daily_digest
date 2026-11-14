@@ -46,7 +46,7 @@ class Store(WorkflowStore):
         def setup(db):
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone():
                 version=db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-                if version not in (1,2,3,4):
+                if version not in (1,2,3,4,5):
                     raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
@@ -68,7 +68,7 @@ class Store(WorkflowStore):
                 CREATE INDEX IF NOT EXISTS run_status ON runs(status,created_at);
             ''')
             version = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-            if version not in (1, 2, 3, 4):
+            if version not in (1, 2, 3, 4, 5):
                 raise RuntimeError('数据库版本不兼容，拒绝降级写入')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (encode({
                 'concurrency': 1, 'retention_days': 30, 'text_limit': 1500,
@@ -205,6 +205,25 @@ class Store(WorkflowStore):
 
     async def get_run(self, run_id):
         return await self.call(lambda db: self.run(db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()))
+
+    async def choose_closing(self, run, template_id, choices):
+        """Reserve once per run; previews never consume formal delivery's history."""
+        import hashlib
+        import secrets
+        scope = hashlib.sha256(encode([run['snapshot']['config']['recipient'], template_id, run['kind']]).encode()).hexdigest()
+        def choose(db):
+            old = db.execute('SELECT choice FROM render_choices WHERE run_id=?', (run['id'],)).fetchone()
+            if old:
+                return json.loads(old[0])
+            previous = db.execute('SELECT last_id FROM render_history WHERE scope=?', (scope,)).fetchone()
+            candidates = [item for item in choices if not previous or item['id'] != previous[0]] or choices
+            if not candidates:
+                return None
+            item = secrets.choice(candidates)
+            db.execute('INSERT INTO render_choices VALUES (?,?)', (run['id'], encode(item)))
+            db.execute('INSERT INTO render_history VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET last_id=excluded.last_id', (scope, item['id']))
+            return item
+        return await self.call(choose)
 
     async def list_runs(self, task_id, page=1):
         return await self.call(lambda db: [self.run(r) for r in db.execute(

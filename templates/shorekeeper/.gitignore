@@ -1,0 +1,4 @@
+/node_modules/
+/.cache/
+/previews/*.html
+/previews/*.checks.json

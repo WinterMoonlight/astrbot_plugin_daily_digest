@@ -43,6 +43,14 @@ def outgoing(db, owner, channel, recipient, body, limit=1500, task_id=None):
              utcnow().isoformat(), task_id, utcnow().isoformat()))
 
 
+def outgoing_image(db, owner, recipient, image, task_id):
+    db.execute('''INSERT OR IGNORE INTO outbox
+        (id,owner,channel,ordinal,recipient,body,hash,state,attempts,next_at,task_id,created_at,kind)
+        VALUES (?,?,'digest',0,?,?,?,'pending',0,?,?,?,'image')''',
+        (uid(), owner, recipient, image['file'], image['sha256'],
+         utcnow().isoformat(), task_id, utcnow().isoformat()))
+
+
 class WorkflowStore:
     async def migrate_workflow(self):
         def migrate(db):
@@ -67,12 +75,19 @@ class WorkflowStore:
                 INSERT OR IGNORE INTO schema_version VALUES (2);
                 INSERT OR IGNORE INTO schema_version VALUES (3);
                 INSERT OR IGNORE INTO schema_version VALUES (4);
+                CREATE TABLE IF NOT EXISTS render_choices (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE, choice TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS render_history (
+                    scope TEXT PRIMARY KEY, last_id TEXT NOT NULL);
             ''')
             if 'created_at' not in {r[1] for r in db.execute('PRAGMA table_info(interactions)')}:
                 db.execute("ALTER TABLE interactions ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
             for column in ('sent_at','ack_at'):
                 if column not in {r[1] for r in db.execute('PRAGMA table_info(outbox)')}:
                     db.execute(f'ALTER TABLE outbox ADD COLUMN {column} TEXT')
+            if 'kind' not in {r[1] for r in db.execute('PRAGMA table_info(outbox)')}:
+                db.execute("ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
+            db.execute('INSERT OR IGNORE INTO schema_version VALUES (5)')
             for record in entities(db, 'dialogue'):
                 if 'window_minutes' in record or 'expires_at' in record:
                     record.pop('window_minutes', None)

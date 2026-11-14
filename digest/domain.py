@@ -57,6 +57,8 @@ class TaskConfig:
     candidate_days: int = 7
     selection_hours: int = 24
     personal_background: str = ''
+    output_mode: str = 'text'
+    template_id: str = 'shorekeeper'
 
     @classmethod
     def from_dict(cls, raw: dict):
@@ -73,9 +75,14 @@ class TaskConfig:
         return config
 
     def validate(self, complete=True):
-        for key in ('name', 'provider_id', 'persona_id', 'prompt', 'recipient', 'time', 'timezone', 'personal_background'):
+        for key in ('name', 'provider_id', 'persona_id', 'prompt', 'recipient', 'time', 'timezone', 'personal_background', 'output_mode', 'template_id'):
             if not isinstance(getattr(self, key), str):
                 raise ValueError(f'{key}必须为文字')
+        if self.output_mode not in ('text', 'image'):
+            raise ValueError('输出方式必须为 text 或 image')
+        import re
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', self.template_id):
+            raise ValueError('无效的模板标识')
         if self.frequency not in ('daily', 'weekly'):
             raise ValueError('频率必须为 daily 或 weekly')
         try:

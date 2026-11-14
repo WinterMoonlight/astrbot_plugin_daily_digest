@@ -194,16 +194,26 @@ class OneBot:
         raise ValueError('未找到对应的 OneBot 平台实例')
 
     async def send_text(self, recipient, text):
+        if not text:
+            return SendResult('failed', reason='不能发送空文本')
+        return await self._send(recipient, [{'type': 'text', 'data': {'text': text}}])
+
+    async def send_image(self, recipient, png):
+        import base64
+        if not isinstance(png, bytes) or not png.startswith(b'\x89PNG\r\n\x1a\n'):
+            return SendResult('failed', reason='无效的 PNG 图片')
+        # NapCat runs in a different container; do not send an AstrBot-local path.
+        return await self._send(recipient, [{'type': 'image', 'data': {'file': 'base64://' + base64.b64encode(png).decode('ascii')}}])
+
+    async def _send(self, recipient, message):
         try:
             _, _, number = split_umo(recipient, 'FriendMessage')
             client = self.client(recipient)
-            if not text:
-                raise ValueError('不能发送空文本')
         except ValueError as exc:
             return SendResult('failed', reason=str(exc))
         try:
             response = await client.call_action('send_private_msg', user_id=int(number),
-                message=[{'type': 'text', 'data': {'text': text}}])
+                message=message)
             # CQHttp returns action data, not the outer status/data envelope.
             if isinstance(response, dict) and type(response.get('message_id')) in (int, str):
                 if str(response['message_id']).strip():

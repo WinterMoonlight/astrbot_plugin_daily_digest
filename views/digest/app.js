@@ -3,10 +3,11 @@ import {initHelp} from './ui.js';
 const $ = (id) => document.getElementById(id);
 const form = $('form');
 const help = initHelp();
-const defaults = {name:'',groups:[],recipient:'',provider_id:'',persona_id:'',personal_background:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
+const defaults = {output_mode:'text',template_id:'shorekeeper',name:'',groups:[],recipient:'',provider_id:'',persona_id:'',personal_background:'',frequency:'daily',weekdays:[0],time:'08:00',timezone:'Asia/Shanghai',lookback_hours:24,lead_minutes:30,candidate_days:7,selection_hours:24,prompt:'提取重要通知、待办与截止时间、变更与取消，分类展示，空分类省略。合并重复事项，保留来源与日期；不明确的信息标为待确认，忽略闲聊。'};
 let selected = null, selectedRun = null, tasks = [], metadata = {models:[],personas:[],groups:[]}, page = 1, pollToken = 0;
 let bridge, initialized = false, deletionPreview = null, deleting = false;
 let savedSettings = {};
+let imageToken = 0;
 const runLabels={queued:'排队中',generating:'生成中',ready:'预览完成',prepared:'正文已准备',sent:'简报已发送',partial:'部分投递失败',unknown:'投递结果未知',missed:'遗漏计划，需手动补发',empty:'无重要内容',failed:'生成失败',cancelled:'已取消'};
 const stateNames={awaiting_native_choice:'等待重复任务确认',native_reused_changed:'复用任务已变化',native_paused:'原生任务已停用',native_absent:'原生任务已结束或删除（送达未确认）',pending:'待处理',scheduled:'等待提醒',retry_wait:'等待重试',sending:'发送中',acknowledged:'已确认发送',failed:'失败',unknown:'结果未知',held:'已停止',active:'可选择',awaiting_delivery:'等待询问成功',awaiting_choice:'等待指定时间',expired:'已过期',superseded:'已被新清单替换',cancelled:'已取消',missed:'已错过',confirmed:'已确认',rejected:'已拒绝'};
 const stateName=state=>stateNames[state]||state;
@@ -42,6 +43,8 @@ function fill(task){
   }
   options(form.elements.provider_id,metadata.models.map(m=>({id:m.id,label:`${m.id} · ${m.model}`})),data.provider_id);
   options(form.elements.persona_id,metadata.personas,data.persona_id,'沿用 AstrBot 会话人格');
+  options(form.elements.template_id,(metadata.templates||[]).map(t=>({id:t.id,label:t.name})),data.template_id,'请选择模板');
+  outputFields(); resetImage();
   taskState();$('delivery-panel').hidden=true;
   $('weekdays').hidden=data.frequency!=='weekly';
   $('preview-state').textContent='';$('preview-text').textContent='尚无预览。';$('preview-meta').textContent='';
@@ -77,7 +80,34 @@ async function save(){
   selected=saved;$('task-title').textContent=saved.config.name||'未命名任务';$('archive').disabled=false;
   await reload();taskState();message(saved.enabled?'已保存，新配置用于后续计划。':'已保存，任务保持停用。');return saved;
 }
+function outputFields(){
+  $('template-field').hidden=form.elements.output_mode.value!=='image';
+  const template=(metadata.templates||[]).find(t=>t.id===form.elements.template_id.value);
+  $('template-note').textContent=(template?.warnings||[]).join('；');
+}
+function resetImage(){
+  imageToken++;$('image-preview').hidden=true;$('preview-image').removeAttribute('src');$('image-download').removeAttribute('href');$('image-status').textContent='';
+}
+async function loadImage(run){
+  resetImage();const token=imageToken;
+  const delivery=run.result?.delivery;
+  if(delivery?.format!=='image'){
+    if(delivery?.requested==='image')$('image-status').textContent=delivery.reason||'本次使用文字输出。';
+    return;
+  }
+  $('image-status').textContent='正在读取图片…';
+  try{
+    const data=await api('image',{id:run.id});
+    if(token!==imageToken)return;
+    if(typeof data.src!=='string'||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(data.src))throw new Error('无效的图片数据');
+    $('preview-image').src=data.src;$('image-download').href=data.src;$('image-preview').hidden=false;
+    $('image-status').textContent=`图片 ${delivery.width} × ${delivery.height} · 日程清单仍以文字发送`;
+  }catch(e){if(token===imageToken)$('image-status').textContent='图片预览不可用：'+e.message;}
+}
+form.elements.output_mode.onchange=outputFields;
+form.elements.template_id.onchange=outputFields;
 function showRun(run){
+  loadImage(run);
   selectedRun=run;$('delivery-panel').hidden=run.kind!=='scheduled';
   $('preview-state').textContent=`${runLabels[run.status]||run.status}${run.error?'：'+run.error:''}`;
   $('preview-text').textContent=run.result?.summary||'暂无简报正文。';
@@ -144,7 +174,7 @@ function textNode(tag,text){const node=document.createElement(tag);node.textCont
 function actionButton(label,fn){const button=textNode('button',label);button.onclick=()=>guard(fn,button);return button;}
 function receiptCard(part,refresh){
   const card=document.createElement('div');card.className='card';card.append(textNode('strong',`${({digest:'简报',inquiry:'日程询问',reminder:'提醒',change:'变更询问',reply:'回复'})[part.channel]||part.channel} #${part.ordinal+1} · ${stateName(part.state)}`));
-  if(part.body)card.append(textNode('pre',part.body));
+  if(part.body)card.append(textNode('pre',part.kind==='image'?'[简报图片]':part.body));
   if(part.receipt)card.append(textNode('p','回执：'+part.receipt));
   if(part.error)card.append(textNode('p',part.error));
   if(part.state==='unknown')for(const [outcome,label] of [['acknowledged','已在 QQ 核实发送成功'],['failed','已在 QQ 核实未发送']])card.append(actionButton(label,async()=>{await api('resolve',{id:part.id,outcome});await refresh();message('已记录核对结果；未发送部分仍需明确补发。');}));

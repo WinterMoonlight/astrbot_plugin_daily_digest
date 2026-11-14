@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from .adapters import SendResult
 from .domain import TaskConfig, parse_time, utcnow
-from .workflow_store import dump, entities, entity, outgoing, put, uid
+from .workflow_store import dump, entities, entity, outgoing, outgoing_image, put, uid
 from . import dialogue
 
 
@@ -56,8 +56,12 @@ class Runtime:
             settings = json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
             config = run['snapshot']['config']
             db.execute('INSERT OR IGNORE INTO delivery(run_id,authorized) VALUES (?,1)', (run_id,))
-            outgoing(db, run_id, 'digest', config['recipient'], run['result']['summary'],
-                     settings['text_limit'], run['task_id'])
+            image = run['result'].get('delivery', {})
+            if image.get('format') == 'image':
+                outgoing_image(db, run_id, config['recipient'], image, run['task_id'])
+            else:
+                outgoing(db, run_id, 'digest', config['recipient'], run['result']['summary'],
+                         settings['text_limit'], run['task_id'])
             db.execute("UPDATE runs SET status='prepared' WHERE id=? AND status='ready'",(run_id,))
         await self.store.call(work)
         self.wake.set()
@@ -235,7 +239,16 @@ class Runtime:
             return False
         try:
             async with asyncio.timeout(60):
-                result=await self.sender.send_text(row['recipient'],row['body'])
+                if row['kind'] == 'image':
+                    from .rendering import RenderError
+                    try:
+                        png = await self.service.renderer.read(row['body'], row['hash'])
+                    except RenderError as exc:
+                        result = SendResult('failed', reason=str(exc))
+                    else:
+                        result = await self.sender.send_image(row['recipient'], png)
+                else:
+                    result=await self.sender.send_text(row['recipient'],row['body'])
         except asyncio.CancelledError:
             raise  # Persisted sending becomes unknown on restart.
         except Exception:

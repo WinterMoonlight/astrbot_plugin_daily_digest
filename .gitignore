@@ -37,6 +37,13 @@ node_modules/
 /.playwright-cli/
 /output/playwright/
 
+# Private template fonts: deployed separately, never published with source
+/templates/**/assets/fonts/private/
+**/[mM][sS][yY][hH]*.[tT][tT][cC]
+**/[mM][sS][yY][hH]*.[tT][tT][fF]
+**/[sS][tT][kK][aA][iI][tT][iI].[tT][tT][fF]
+**/[gG][eE][oO][rR][gG][iI][aA]*.[tT][tT][fF]
+
 # Local planning and session notes
 /task_plan.md
 /findings.md

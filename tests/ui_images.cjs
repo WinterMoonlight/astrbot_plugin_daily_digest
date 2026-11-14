@@ -1,0 +1,45 @@
+const assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_ROOT+'/playwright');
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const page=await browser.newPage({viewport:{width:1280,height:1000}});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('http://127.0.0.1:18764/');
+  await page.waitForFunction(()=>document.querySelector('#provider').options.length>1);
+  assert.equal(await page.locator('#output-mode').inputValue(),'text');
+  assert.equal(await page.locator('#template-field').isVisible(),false);
+  await page.locator('#task-name').fill('图片模板测试');
+  await page.locator('#recipient').fill('test:FriendMessage:456');
+  await page.locator('#provider').selectOption('fixture');
+  await page.locator('#group-picker').selectOption('test:GroupMessage:123');
+  await page.locator('#output-mode').selectOption('image');
+  assert.equal(await page.locator('#template-field').isVisible(),true);
+  await page.locator('#template-id').selectOption('shorekeeper');
+  await page.locator('#save').click();
+  await page.waitForFunction(()=>document.querySelector('#message').textContent.includes('已保存'));
+  await page.locator('[data-tab="preview"]').click();
+  await page.locator('#generate').click();
+  await page.waitForFunction(()=>document.querySelector('#preview-image').complete&&document.querySelector('#preview-image').naturalWidth>0);
+  assert.equal(await page.locator('#image-preview').isVisible(),true);
+  assert.ok((await page.locator('#image-download').getAttribute('href')).startsWith('data:image/png;base64,'));
+  assert.ok((await page.locator('#preview-text').textContent()).includes('<img src=x onerror=alert(1)>'));
+  assert.equal(await page.locator('#preview-text img').count(),0);
+  assert.equal(await page.evaluate(()=>window.fixtureActions.includes('resend')),false);
+  await page.evaluate(()=>window.fixtureImageFailure=true);
+  await page.locator('#generate').click();
+  await page.waitForFunction(()=>document.querySelector('#image-status').textContent.includes('图片预览不可用'));
+  assert.equal(await page.locator('#image-preview').isVisible(),false);
+  await page.locator('[data-tab="config"]').click();
+  await page.locator('#output-mode').selectOption('text');
+  await page.locator('#save').click();
+  await page.locator('[data-tab="preview"]').click();
+  await page.locator('#generate').click();
+  await page.waitForFunction(()=>document.querySelector('#preview-state').textContent.includes('预览完成'));
+  assert.equal(await page.locator('#image-preview').isVisible(),false);
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
+  assert.deepEqual(errors,[]);
+  console.log('UI passed: default text, image selection, save, image preview/download, safe text, error display, switch to text, mobile layout');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -5,6 +5,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from .domain import parse_time, split_umo, utcnow
+from .presentation import checked_report, report_text
 
 
 def json_object(text):
@@ -97,6 +98,15 @@ class Generator:
             specs['final'] += ('本次未能读取：' + '、'.join(unavailable) +
                                '。若有简报，用所选人格最多一句说明内容可能不全，不声称完整覆盖。')
         specs['final'] += '读取条数不等于采纳条数，不编造采纳数量；正常读取时无需说明统计。'
+        if task.output_mode == 'image':
+            specs['final'] += ('本次使用图片卡片排版。在同一 JSON 中额外输出 report：'
+                '{"intro":"符合所选人格的简短开场，可为空", "sections":'
+                '[{"label":"简短分类", "title":"具体事项短标题", "body":"自然、简洁的事项正文",'
+                '"sources":["本事项来源id"]}]}。'
+                'report 必须完整保留 summary 的事实、日期、适用条件及必要的不确定性说明，不重复同一事项。'
+                'summary 保留为可直接发送的备用正文；没有重要内容时 summary 为空且 report 为 null。'
+                '每项只写一次，按重要程度排列；不生成主标题、日期、角色寄语或表情。'
+                '所有正文都是纯文本，不输出 HTML、Markdown 表格或图片。')
         size = lambda value: len(compact(value).encode('utf-8'))
         window = {'start': start.isoformat(), 'end': end.isoformat(), 'timezone': task.timezone}
         reserve = max(1024, prepared['window'] // 4)
@@ -255,6 +265,12 @@ class Generator:
         if not isinstance(final.get('summary'), str) or not isinstance(final.get('candidates'), list):
             raise ValueError('模型最终结果格式不正确')
         result['summary'] = final['summary'].strip()
+        if task.output_mode == 'image' and result['summary']:
+            try:
+                result['report'] = checked_report(final.get('report'), known)
+                result['summary'] = report_text(result['report'])
+            except ValueError as exc:
+                result['warnings'].append(f'{exc}，本次改用文字输出')
         changes = final.get('changes', [])
         if not isinstance(changes, list):
             raise ValueError('变更列表格式不正确')

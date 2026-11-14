@@ -42,15 +42,22 @@ test('personal background defaults empty on old tasks and survives form round tr
     form: {elements}, structuredClone,
     document: {querySelectorAll: selector => selector.includes(':checked') ? weekdays.filter(day => day.checked) : weekdays},
     $: id => nodes[id] ||= {}, metadata: {models: [], personas: []},
-    options(){}, taskState(){}, renderGroups(){}, renderTasks(){}, tab(){},
+    options(){}, taskState(){}, renderGroups(){}, renderTasks(){}, tab(){}, outputFields(){}, resetImage(){},
   });
   const legacy = {...defaults, prompt: '原来的总结要求', persona_id: 'personality'};
   delete legacy.personal_background;
+  delete legacy.output_mode;
+  delete legacy.template_id;
   methods.fill({config: legacy});
   assert.equal(elements.personal_background.value, '');
+  assert.equal(elements.output_mode.value, 'text');
+  assert.equal(elements.template_id.value, 'shorekeeper');
+  elements.output_mode.value = 'image';
   elements.personal_background.value = '学习委员，关注课程安排';
   const saved = methods.readConfig();
   assert.equal(saved.personal_background, '学习委员，关注课程安排');
+  assert.equal(saved.output_mode, 'image');
+  assert.equal(saved.template_id, 'shorekeeper');
   assert.equal(saved.prompt, legacy.prompt);
   assert.equal(saved.persona_id, legacy.persona_id);
   methods.fill({config: saved});

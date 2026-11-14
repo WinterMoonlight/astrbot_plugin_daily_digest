@@ -16,6 +16,7 @@ from .digest.interactions import Interactions, Interpreter
 from .digest.native_reminders import NativeReminders
 from .digest.deletion import TaskDeletion
 from .digest.receipts import ReplyRenderer
+from .digest.rendering import ImageRenderer
 
 PLUGIN_NAME = 'astrbot_plugin_daily_digest'
 
@@ -28,7 +29,8 @@ class DailyDigest(Star):
         self.store = Store(Path(get_astrbot_plugin_data_path()) / PLUGIN_NAME / 'digest.sqlite3')
         self.models = NativeModels(context)
         self.onebot = OneBot(context)
-        self.service = Service(self.store, Generator(self.models, NativeHistory(context)))
+        self.image_renderer = ImageRenderer(self.store, Path(__file__).parent / 'templates')
+        self.service = Service(self.store, Generator(self.models, NativeHistory(context)), self.image_renderer)
         self.native_reminders = NativeReminders(self.store, context.cron_manager)
         self.runtime = Runtime(self.store, self.service, self.onebot, self.native_reminders)
         self.service.on_ready = self.runtime.freeze
@@ -88,7 +90,10 @@ class DailyDigest(Star):
                               for g in items)
             except Exception:
                 warnings.append(f'{meta.id} 群列表读取失败，可手动填写 UMO')
-        return {'models': models, 'personas': personas, 'groups': groups, 'warnings': warnings}
+        import asyncio
+        templates, template_warnings = await asyncio.to_thread(self.image_renderer.catalog.list)
+        return {'models': models, 'personas': personas, 'groups': groups, 'templates': templates,
+                'warnings': warnings + template_warnings}
 
     async def rpc(self):
         if not self.initialized:
@@ -115,6 +120,8 @@ class DailyDigest(Star):
                 data = {'id': await self.service.preview(payload['id'])}
             elif action == 'run':
                 data = await self.store.get_run(payload['id'])
+            elif action == 'image':
+                data = await self.image_renderer.preview(payload['id'])
             elif action == 'runs':
                 page = payload.get('page', 1)
                 if type(page) is not int or page < 1:

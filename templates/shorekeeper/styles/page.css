@@ -1,0 +1,5 @@
+* { box-sizing:border-box; }
+body { margin:0; background:#e3edf4; color:var(--ink); font-family:var(--body-font); }
+#pages { display:grid; gap:24px; width:var(--page-width); margin:0 auto; }
+.report-page { width:var(--page-width); height:auto; position:relative; isolation:isolate; overflow:hidden; display:flex; flex-direction:column; }
+.card-stack { position:relative; z-index:2; display:grid; gap:var(--card-gap); width:100%; }
