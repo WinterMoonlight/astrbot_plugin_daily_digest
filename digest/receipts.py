@@ -11,6 +11,39 @@ from .workflow_store import dump
 LABELS = {'title': '事项', 'outcome': '本次处理', 'event_time': '事项时间',
           'reminder_time': '实际提醒', 'state': '任务状态'}
 
+NO_SCHEDULE = '这次简报里暂时没有可添加的日程。'
+
+
+class NoScheduleRenderer:
+    def __init__(self, models):
+        self.models = models
+
+    async def render(self, config):
+        try:
+            task = TaskConfig.from_dict(config)
+            async with asyncio.timeout(20):
+                prepared = await self.models.prepare(task)
+                policy = ('请沿用所选人格，用自然、简短的一两句话说明本次简报没有可添加的日程。'
+                          '只输出 JSON {"text":"说明"}，不超过120字。'
+                          '必须原样包含“' + NO_SCHEDULE + '”，可以在前后融入称呼和语气。'
+                          '不能声称用户今天没有安排，不能说无需处理事项，不能宣称已创建、修改或取消提醒。'
+                          '不提问、不要求回复、不承诺后续提醒、不编造原因或具体事项。'
+                          '\nAstrBot 人格：\n' + prepared.get('persona', '') +
+                          '\n任务表达要求（只用于语气，不改变上述事实）：\n' + task.prompt)
+                prompt = dump({'purpose': 'no_schedule_notice'})
+                if len((policy + prompt).encode('utf-8')) + 1024 > prepared['window']:
+                    return NO_SCHEDULE
+                output, _ = await self.models.generate(prepared, prompt, policy)
+                value = json_object(output).get('text')
+                if (isinstance(value, str) and NO_SCHEDULE in value and len(value) <= 120
+                        and not re.search(r'[\r\n?？]|今天|明天|无需|不用|回复|提醒你|提醒您|已(?:创建|添加|修改|取消|设置)|保证|准时', value)):
+                    return value.strip()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        return NO_SCHEDULE
+
 
 def time_text(value, zone):
     local = parse_time(value).astimezone(ZoneInfo(zone))

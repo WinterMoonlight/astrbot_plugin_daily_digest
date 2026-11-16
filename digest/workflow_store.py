@@ -156,7 +156,7 @@ class WorkflowStore:
         return await self.call(prepare)
 
     async def authorize_delivery(self, run_id, channel):
-        if channel not in ('digest','inquiry'):
+        if channel not in ('digest','inquiry','no_schedule'):
             raise ValueError('未知投递部分')
         def authorize(db):
             run = self.run(db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone())

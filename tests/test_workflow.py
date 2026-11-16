@@ -157,7 +157,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.freeze(ident);await self.drain()
         self.assertFalse(self.sender.calls)
         await self.store.authorize_delivery(ident,'digest');await self.drain()
-        self.assertEqual(len(self.sender.calls),1)
+        self.assertEqual(len(self.sender.calls),2)
+        self.assertEqual(self.sender.calls[0][1], '重新生成正文')
+        self.assertIn('这次简报里暂时没有可添加的日程', self.sender.calls[1][1])
 
     async def test_disable_stops_next_part_but_keeps_reminders(self):
         ident=await self.active_list();await self.select(ident)

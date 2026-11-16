@@ -4,6 +4,6 @@ short_desc: 将多个 QQ 群的重要通知整理为文字或图片，并按需�
 support_platforms:
   - aiocqhttp
 desc: 多任务群消息简报，支持文字或图片简报、定时私聊投递、回执核对与补发、自然语言选择日程及关联提醒管理。
-version: v0.5.2
+version: v0.5.3
 author: WinterMoonlight
 repo: https://github.com/WinterMoonlight/astrbot_plugin_daily_digest

@@ -17,7 +17,7 @@
 
 ## 排版参考
 
-本版独立实现 HTML/CSS，参考以下项目的视觉层次、渐变页眉、留白、分区卡片和编号标签，没有复制其统计图表或报告正文：
+本版使用 Typst 独立实现排版，参考以下项目的视觉层次、渐变页眉、留白、分区卡片和编号标签，没有复制其统计图表或报告正文：
 
 - [群聊日常分析插件](https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis)
 - [ATRI 示例](https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis/blob/main/assets/ATRI-demo.webp)

@@ -143,6 +143,21 @@ class ImageWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.runtime.deliver_one())
         self.assertEqual(len(self.sender.calls), 2)
 
+    async def test_image_without_candidates_sends_notice_after_ack(self):
+        from digest.receipts import NO_SCHEDULE
+        run = await self.make_run()
+        run['result']['candidates'] = []
+        await self.store.finish(run['id'], 'ready', run['result'])
+        await self.runtime.freeze(run['id'])
+        await self.runtime.deliver_one()
+        self.assertEqual([call[0] for call in self.sender.calls], ['image'])
+        await self.runtime.deliver_one()
+        self.assertEqual(self.sender.calls[1][2], NO_SCHEDULE)
+        await self.store.initialize()
+        await self.runtime.reconcile()
+        self.assertFalse(await self.runtime.deliver_one())
+        self.assertEqual(len(self.sender.calls), 2)
+
     async def test_unknown_image_is_not_retried_or_replaced_by_text(self):
         run = await self.make_run()
         await self.runtime.freeze(run['id'])

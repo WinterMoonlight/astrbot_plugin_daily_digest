@@ -3,7 +3,9 @@ import {readdir, mkdir, writeFile, stat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
-import {root} from './build.mjs';
+import {fileURLToPath} from 'node:url';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
 
 const require = createRequire(import.meta.url);
 const sharp = require(process.env.PLAYWRIGHT_MODULE_ROOT ? path.join(process.env.PLAYWRIGHT_MODULE_ROOT, 'sharp') : 'sharp');

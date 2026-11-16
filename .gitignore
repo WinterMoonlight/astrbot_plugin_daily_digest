@@ -45,6 +45,8 @@ node_modules/
 **/[gG][eE][oO][rR][gG][iI][aA]*.[tT][tT][fF]
 
 # Local planning and session notes
+/.planning/
+/开发需求.md
 /task_plan.md
 /findings.md
 /progress.md

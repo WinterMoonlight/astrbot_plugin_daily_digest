@@ -73,7 +73,8 @@ def render(request, destination):
 
 if __name__ == '__main__':
     try:
-        value = render(json.load(sys.stdin), Path(sys.argv[1]))
+        # The parent sends UTF-8 bytes, independent of the Windows console locale.
+        value = render(json.load(sys.stdin.buffer), Path(sys.argv[1]))
     except Exception as error:
         value = {'ok': False, 'error': str(error)[:1200]}
     sys.stdout.buffer.write(json.dumps(value, ensure_ascii=False).encode('utf-8'))

@@ -173,7 +173,7 @@ $('toggle').onclick=()=>guard(async()=>{if(!selected)return;selected=await api('
 function textNode(tag,text){const node=document.createElement(tag);node.textContent=text;return node;}
 function actionButton(label,fn){const button=textNode('button',label);button.onclick=()=>guard(fn,button);return button;}
 function receiptCard(part,refresh){
-  const card=document.createElement('div');card.className='card';card.append(textNode('strong',`${({digest:'简报',inquiry:'日程询问',reminder:'提醒',change:'变更询问',reply:'回复'})[part.channel]||part.channel} #${part.ordinal+1} · ${stateName(part.state)}`));
+  const card=document.createElement('div');card.className='card';card.append(textNode('strong',`${({digest:'简报',inquiry:'日程询问',no_schedule:'无可添加日程说明',reminder:'提醒',change:'变更询问',reply:'回复'})[part.channel]||part.channel} #${part.ordinal+1} · ${stateName(part.state)}`));
   if(part.body)card.append(textNode('pre',part.kind==='image'?'[简报图片]':part.body));
   if(part.receipt)card.append(textNode('p','回执：'+part.receipt));
   if(part.error)card.append(textNode('p',part.error));
@@ -183,7 +183,7 @@ function receiptCard(part,refresh){
 async function delivery(){if(!selectedRun)return;const data=await api('delivery',{id:selectedRun.id});showRun(data.run);$('delivery-parts').replaceChildren();for(const part of data.parts)$('delivery-parts').append(receiptCard(part,delivery));}
 $('delivery-refresh').onclick=()=>guard(delivery,$('delivery-refresh'));
 $('catchup-preview').onclick=()=>guard(async()=>{if(!selectedRun)return;const id=selectedRun.id;await api('catchup_preview',{id});const token=++pollToken;message('正在准备补发预览，尚未提交发送。');while(token===pollToken){const run=await api('run',{id});showRun(run);if(!['queued','generating','ready'].includes(run.status)){await delivery();break;}await new Promise(r=>setTimeout(r,1000));}},$('catchup-preview'));
-for(const [id,channel] of [['resend-digest','digest'],['resend-inquiry','inquiry']])$(id).onclick=()=>guard(async()=>{if(!selectedRun)return;await api('resend',{id:selectedRun.id,channel});message('已提交未成功部分，请刷新查看回执。');await delivery();},$(id));
+for(const [id,channel] of [['resend-digest','digest'],['resend-inquiry','inquiry'],['resend-no-schedule','no_schedule']])$(id).onclick=()=>guard(async()=>{if(!selectedRun)return;await api('resend',{id:selectedRun.id,channel});message('已提交未成功部分，请刷新查看回执。');await delivery();},$(id));
 let dynamicFieldId=0;
 function field(card,label,value=''){
   const node=document.createElement('div'),heading=document.createElement('div'),labelNode=document.createElement('label'),input=document.createElement('input'),tip=document.createElement('button');

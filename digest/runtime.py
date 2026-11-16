@@ -8,6 +8,7 @@ from .adapters import SendResult
 from .domain import TaskConfig, parse_time, utcnow
 from .workflow_store import dump, entities, entity, outgoing, outgoing_image, put, uid
 from . import dialogue
+from .receipts import NO_SCHEDULE
 
 
 def display_time(value, zone='Asia/Shanghai'):
@@ -15,13 +16,15 @@ def display_time(value, zone='Asia/Shanghai'):
 
 
 class Runtime:
-    def __init__(self, store, service, sender, native=None):
+    def __init__(self, store, service, sender, native=None, notice_renderer=None):
         self.store, self.service, self.sender = store, service, sender
         self.native = native
+        self.notice_renderer = notice_renderer
         self.wake = asyncio.Event()
         self.stopping = False
         self.worker = None
         self.tick_lock = asyncio.Lock()
+        self.reconcile_lock = asyncio.Lock()
         self.last_error = None
 
     async def start(self):
@@ -66,7 +69,14 @@ class Runtime:
         await self.store.call(work)
         self.wake.set()
 
-    def complete_digest(self, db, run, now, settings):
+    @staticmethod
+    def eligible_items(run, now):
+        config = run['snapshot']['config']
+        today = now.astimezone(ZoneInfo(config['timezone'])).date()
+        return [x for x in run['result'].get('candidates', []) if parse_time(x['event_at']) > now and
+                today <= parse_time(x['event_at']).astimezone(ZoneInfo(config['timezone'])).date() < today + timedelta(days=config['candidate_days'])]
+
+    def complete_digest(self, db, run, now, settings, notices):
         config = run['snapshot']['config']; recipient = config['recipient']
         db.execute('UPDATE delivery SET completed=1 WHERE run_id=?', (run['id'],))
         db.execute("UPDATE runs SET status='sent',updated_at=? WHERE id=?", (now.isoformat(),run['id']))
@@ -79,9 +89,7 @@ class Runtime:
             if old['task_id']==run['task_id'] and old['state'] in ('active','awaiting_delivery'):
                 old['state']='superseded'; put(db,'list',old)
                 db.execute("UPDATE outbox SET state='held' WHERE owner=? AND channel='inquiry' AND state='pending'",(old['run_id'],))
-        today=now.astimezone(ZoneInfo(config['timezone'])).date()
-        items=[x for x in run['result'].get('candidates',[]) if parse_time(x['event_at'])>now and
-               today <= parse_time(x['event_at']).astimezone(ZoneInfo(config['timezone'])).date() < today+timedelta(days=config['candidate_days'])]
+        items = self.eligible_items(run, now)
         if items:
             record={'id':run['id'],'run_id':run['id'],'task_id':run['task_id'],'recipient':recipient,
                     'state':'awaiting_delivery','expires_at':None,'config':config,'items':items}
@@ -99,6 +107,9 @@ class Runtime:
             text+=f"\n本轮前 {settings['reply_message_limit']} 条有效文字消息可直接回复，之后请引用这条清单或使用 /日程。"
             outgoing(db,run['id'],'inquiry',recipient,text,settings['text_limit'],run['task_id'])
             dialogue.queue(db, run['id'], 'inquiry', recipient, {'list': [record]}, settings)
+        else:
+            outgoing(db, run['id'], 'no_schedule', recipient,
+                     notices.get(run['id'], NO_SCHEDULE), settings['text_limit'], run['task_id'])
         for change in run['result'].get('changes',[]):
             matches=[r for r in entities(db,'reminder',recipient) if r['state'] not in ('cancelled','missed')
                      and r['title']==change['title'] and r['event_at']==change['old_event_at']]
@@ -130,7 +141,25 @@ class Runtime:
                        {'change': [change], 'reminder': [reminder]}, settings)
 
     async def reconcile(self, now=None, restart=False, due=True):
+        async with self.reconcile_lock:
+            await self._reconcile(now, restart, due)
+
+    async def _reconcile(self, now=None, restart=False, due=True):
         now=now or utcnow()
+        # Generate only after all digest parts are acknowledged, outside any DB transaction.
+        # Completion and the frozen outbox text are committed together below.
+        ready = await self.store.call(lambda db: [self.store.run(r) for r in db.execute("""
+            SELECT r.* FROM runs r JOIN delivery d ON d.run_id=r.id
+            JOIN tasks t ON t.id=r.task_id
+            WHERE d.completed=0 AND r.kind='scheduled' AND r.result IS NOT NULL
+            AND t.enabled=1 AND t.archived=0
+            AND EXISTS (SELECT 1 FROM outbox o WHERE o.owner=r.id AND o.channel='digest')
+            AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.owner=r.id AND o.channel='digest' AND o.state!='acknowledged')
+        """)]) if self.notice_renderer else []
+        notices = {}
+        for run in ready:
+            if not self.eligible_items(run, now):
+                notices[run['id']] = await self.notice_renderer.render(run['snapshot']['config'])
         def work(db):
             settings=json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0])
             for row in db.execute("SELECT r.*,d.completed FROM runs r JOIN delivery d ON d.run_id=r.id WHERE d.completed=0 AND r.result IS NOT NULL").fetchall():
@@ -138,7 +167,7 @@ class Runtime:
                 parts=[dict(x) for x in db.execute("SELECT * FROM outbox WHERE owner=? AND channel='digest' ORDER BY ordinal",(run['id'],))]
                 if parts and not run['completed']:
                     if all(x['state']=='acknowledged' for x in parts):
-                        self.complete_digest(db,run,now,settings)
+                        self.complete_digest(db,run,now,settings,notices)
                     elif any(x['state']=='unknown' for x in parts):
                         db.execute("UPDATE runs SET status='unknown' WHERE id=?",(run['id'],))
                         db.execute('UPDATE delivery SET authorized=0 WHERE run_id=?',(run['id'],))
@@ -208,7 +237,7 @@ class Runtime:
                 if db.execute("SELECT 1 FROM outbox WHERE owner=? AND channel=? AND ordinal<? AND state!='acknowledged'",
                               (row['owner'],row['channel'],row['ordinal'])).fetchone():
                     continue
-                if row['channel'] in ('digest','inquiry'):
+                if row['channel'] in ('digest','inquiry','no_schedule'):
                     task=self.store.task(db.execute('SELECT * FROM tasks WHERE id=?',(row['task_id'],)).fetchone())
                     delivery=db.execute('SELECT * FROM delivery WHERE run_id=?',(row['owner'],)).fetchone()
                     if not delivery or not delivery['authorized'] or not task['enabled'] or task['archived']:
@@ -262,7 +291,7 @@ class Runtime:
                     state='pending'; next_at=now+timedelta(minutes=1)
             db.execute('UPDATE outbox SET state=?,receipt=?,error=?,next_at=?,ack_at=? WHERE id=?',
                 (state,result.receipt,result.reason,next_at.isoformat(),now.isoformat() if state=='acknowledged' else None,row['id']))
-            if row['channel'] in ('digest','inquiry') and state in ('failed','unknown'):
+            if row['channel'] in ('digest','inquiry','no_schedule') and state in ('failed','unknown'):
                 db.execute('UPDATE delivery SET authorized=0 WHERE run_id=?',(row['owner'],))
         await self.store.call(finish)
         await self.reconcile(due=False)
